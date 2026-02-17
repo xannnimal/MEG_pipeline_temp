@@ -3,24 +3,32 @@
 """
 Created on Fri Feb 13 10:40:01 2026
 
-@author: alexandria
+@author: Alexandria McPherson
 
 
-Pipeline development for C-SHARP MEG data, both CTF data from USCF and FieldLine OPM
+C-SHARP MEG Forward & Inverse Pipeline
+Supports both CTF (UCSF) and FieldLine OPM data.
 
-Load data (CTF vs FIF files) - make functions for each data type
-Do coregistration, either in line or through YORC script
-Preprocessing - Reject eyeblinks with ICA (?), high-pass filter, add functions for SSS, homogenous field correction, etc
-Make evokes for each condition
-Create covariance
-Forward solution
-Inverse solutions - explore options. Most take norm and throw away the orientation. Look into “free” orientation vs locked
-Apply inverse to evokeds
-Put into BIDS structure, specifically with events
-Generate MNE-report
+Full pipeline description: 
+    1. Load data (CTF vs FIF files) - make functions for each data type
+    2. Do coregistration, either in line or through YORC script
+    3. Preprocessing - Reject eyeblinks with ICA (?), high-pass filter, add functions for SSS, homogenous field correction, etc
+    4. Make evokeds for each condition
+    5. Create covariance
+    6. Forward solution
+    7. Inverse solutions - explore options. Most take norm and throw away the orientation. Look into “free” orientation vs locked
+    8. Apply inverse to evokeds
+    9. Put into BIDS structure, specifically with events
+    10. Generate MNE-report
+
+This module covers steps 1-4 of the full pipeline:
+    1. Load data (CTF vs FIF files) - make functions for each data type
+    2. Do coregistration, either in line or through YORC script
+    3. Preprocessing - Reject eyeblinks with ICA (?), high-pass filter, add functions for SSS, homogenous field correction, etc
+    4. Make evokeds for each condition - parsed with event IDs
 """
 
-## Import Dependencies ##
+# --- Dependencies -----------------------------------------------------------
 import mne
 from mne import combine_evoked
 from mne.datasets.brainstorm import bst_auditory
@@ -31,12 +39,8 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-#########
-## specify path to datasets
-rawfile = Path('/Users/alexandria/Documents/STANFORD/FieldLine_tests/subjects/sub-XM/20260206_143328_sub-XM_file-xantone_raw.fif')
 
-
-####
+# --- Helpers -----------------------------------------------------------------
 
 def OPM_data(rawfile, trigger_chan, prepros_type):
     raw=mne.io.read_raw_fif(rawfile ,'default', preload=True)
@@ -62,33 +66,45 @@ def OPM_data(rawfile, trigger_chan, prepros_type):
     return raw,events
 
 
-#### OPM DATASETS #####
-## Define constants
-trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
-## Load and Filter Data ## 
-## Define filter type
-# 'high-filter' = applies high-pass filter 3, low pass 40.
-# 'ssp-filter' = applies high-pass filter 0.1, low pass 40, and SSP proj from baseline
-# more to come
-prepros_type = 'ssp-filter' 
-[raw, events] = OPM_data(rawfile, trigger_chan, prepros_type)
+# --- Main (example usage) ---------------------------------------------------
 
-## Get epochs and evoked response
-tmin = -0.2  # start of each epoch (200ms before the trigger)
-tmax = 0.6  # end of each epoch (600ms after the trigger)
-epochs_raw = mne.Epochs(raw, events, tmin=tmin, tmax=tmax, baseline=None, preload=True)
-evoked_raw = epochs_raw.average()
-fig = evoked_raw.plot_joint()
+if __name__ == '__main__':
+    rawfile = Path('/Users/alexandria/Documents/STANFORD/FieldLine_tests/subjects/sub-XM/20260206_143328_sub-XM_file-xantone_raw.fif')
 
-
-#### STEPS TO ADD
-## save events
-# mne.write_events( participant + '/' + participant + '_events.fif',events)
-## define triggers
-# event_id = dict(<cond1> = 1, <cond2> = 2, <cond3> = 16, <cond4> = 32)  
-
-
-
-
-
-
+    ## Define constants
+    trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
+    ## Load and Filter Data ## 
+    ## Define filter type
+    # 'high-filter' = applies high-pass filter 3, low pass 40.
+    # 'ssp-filter' = applies high-pass filter 0.1, low pass 40, and SSP proj from baseline
+    # more to come
+    prepros_type = 'ssp-filter' 
+    [raw, events] = OPM_data(rawfile, trigger_chan, prepros_type)
+    
+    ## Get epochs and evoked response
+    tmin = -0.2  # start of each epoch (200ms before the trigger)
+    tmax = 0.6  # end of each epoch (600ms after the trigger)
+    epochs = mne.Epochs(raw, events, tmin=tmin, tmax=tmax, baseline=None, preload=True)
+    evoked = epochs.average()
+    fig = evoked.plot_joint()
+    
+    
+    #### STEPS TO ADD
+    ## save events
+    # mne.write_events( participant + '/' + participant + '_events.fif',events)
+    ## define triggers
+    # event_id = dict(<cond1> = 1, <cond2> = 2, <cond3> = 16, <cond4> = 32)  
+    ## compute covariance and write to file
+    # cov = mne.cov.compute_covariance(epochs, 0)
+    # cov = mne.cov.regularize(cov, evoked.info, mag=0.05, grad = 0.05, proj = True, exclude = 'bads')
+    ## make foward solution
+    # fwd = mne.make_forward_solution(info = info, mri = mri, src = src, bem = bem, fname = fname, meg = True, eeg = False, overwrite = True)
+    ## make inverse operator 
+    # inv = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, cov, loose = None, depth = None, fixed = False)
+    ## apply inverse for each condition 
+    
+    
+    
+    
+    
+    
