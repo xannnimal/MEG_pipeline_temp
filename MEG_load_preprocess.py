@@ -31,6 +31,10 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
+#########
+## specify path to datasets
+rawfile = Path('/Users/alexandria/Documents/STANFORD/FieldLine_tests/subjects/sub-XM/20260206_143328_sub-XM_file-xantone_raw.fif')
+
 
 ####
 
@@ -57,10 +61,6 @@ def OPM_data(rawfile, trigger_chan, prepros_type):
     raw.notch_filter(freqs=60, picks=meg_picks)
     return raw,events
 
-######
-## specify path to datasets
-rawfile = Path('/Users/alexandria/Documents/STANFORD/FieldLine_tests/subjects/sub-XM/20260206_143328_sub-XM_file-xantone_raw.fif')
-
 
 #### OPM DATASETS #####
 ## Define constants
@@ -79,6 +79,13 @@ tmax = 0.6  # end of each epoch (600ms after the trigger)
 epochs_raw = mne.Epochs(raw, events, tmin=tmin, tmax=tmax, baseline=None, preload=True)
 evoked_raw = epochs_raw.average()
 fig = evoked_raw.plot_joint()
+
+
+#### STEPS TO ADD
+## save events
+# mne.write_events( participant + '/' + participant + '_events.fif',events)
+## define triggers
+# event_id = dict(<cond1> = 1, <cond2> = 2, <cond3> = 16, <cond4> = 32)  
 
 
 
