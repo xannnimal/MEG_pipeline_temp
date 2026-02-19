@@ -42,7 +42,7 @@ from pathlib import Path
 
 # --- Helpers -----------------------------------------------------------------
 
-def OPM_data(rawfile, trigger_chan, prepros_type):
+def get_OPM_data(rawfile, trigger_chan, prepros_type):
     raw=mne.io.read_raw_fif(rawfile ,'default', preload=True)
     ## find events
     events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
@@ -69,24 +69,25 @@ def OPM_data(rawfile, trigger_chan, prepros_type):
 # --- Main (example usage) ---------------------------------------------------
 
 if __name__ == '__main__':
-    rawfile = Path('/Users/alexandria/Documents/STANFORD/FieldLine_tests/subjects/sub-XM/20260206_143328_sub-XM_file-xantone_raw.fif')
-
+    rawfiles = [Path('/Users/alexandria/Documents/STANFORD/FieldLine_tests/subjects/sub-XM/20260206_143328_sub-XM_file-xantone_raw.fif')]
     ## Define constants
     trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
-    ## Load and Filter Data ## 
-    ## Define filter type
-    # 'high-filter' = applies high-pass filter 3, low pass 40.
-    # 'ssp-filter' = applies high-pass filter 0.1, low pass 40, and SSP proj from baseline
-    # more to come
-    prepros_type = 'ssp-filter' 
-    [raw, events] = OPM_data(rawfile, trigger_chan, prepros_type)
     
-    ## Get epochs and evoked response
-    tmin = -0.2  # start of each epoch (200ms before the trigger)
-    tmax = 0.6  # end of each epoch (600ms after the trigger)
-    epochs = mne.Epochs(raw, events, tmin=tmin, tmax=tmax, baseline=None, preload=True)
-    evoked = epochs.average()
-    fig = evoked.plot_joint()
+    for rawfile in rawfiles:
+        ## Load, get Events, and Filter Data ## 
+        ## Define filter type
+        # 'high-filter' = applies high-pass filter 3, low pass 40.
+        # 'ssp-filter' = applies high-pass filter 0.1, low pass 40, and SSP proj from baseline
+        # more to come
+        prepros_type = 'ssp-filter' 
+        [raw, events] = get_OPM_data(rawfile, trigger_chan, prepros_type)
+        
+        ## Get epochs and evoked response
+        tmin = -0.2  # start of each epoch (200ms before the trigger)
+        tmax = 0.6  # end of each epoch (600ms after the trigger)
+        epochs = mne.Epochs(raw, events, tmin=tmin, tmax=tmax, baseline=None, preload=True)
+        evoked = epochs.average()
+        fig = evoked.plot_joint()
     
     
     #### STEPS TO ADD
