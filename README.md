@@ -3,7 +3,9 @@
 C-SHARP MEG Forward & Inverse Pipeline
 Supports both CTF (UCSF) and FieldLine OPM data.
 
-Full pipeline description: 
+FreeSurfer
+Coregistration with Lidar camera
+Run pipeline. Description: 
 1. Load data (CTF vs FIF files) - make functions for each data type
 2. Do coregistration, either in line or through YORC script
 3. Preprocessing - Reject eyeblinks with ICA (?), high-pass filter, add functions for SSS, homogenous field correction, etc
