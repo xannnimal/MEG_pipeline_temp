@@ -3,16 +3,20 @@
 C-SHARP MEG Forward & Inverse Pipeline
 Supports both CTF (UCSF) and FieldLine OPM data.
 
-FreeSurfer
-Coregistration with Lidar camera
-Run pipeline. Description: 
-1. Load data (CTF vs FIF files) - make functions for each data type
-2. Do coregistration, either in line or through YORC script
-3. Preprocessing - Reject eyeblinks with ICA (?), high-pass filter, add functions for SSS, homogenous field correction, etc
-4. Make evokeds for each condition
-5. Create covariance
-6. Forward solution
-7. Inverse solutions - explore options. Most take norm and throw away the orientation. Look into “free” orientation vs locked
-8. Apply inverse to evokeds
-9. Put into BIDS structure, specifically with events
-10. Generate MNE-report
+## FreeSurfer
+Generate mriscalp.stl and relevent files for forward and inverse modeling
+TODO: add specifics
+
+## Coregistration with Lidar camera
+Generate -trans.fif and add trans object to raw data info structure by running coregistration code. TODO: add specifics
+
+## Run pipeline.
+1. Load data (CTF vs FIF files)
+2. Preprocessing - Reject eyeblinks with ICA (?), high-pass filter, add functions for SSS, homogenous field correction, etc
+3. Make evokeds for each condition
+4. Create covariance
+5. Forward solution
+6. Inverse solutions - explore options. Most take norm and throw away the orientation. Look into “free” orientation vs locked
+7. Apply inverse to evokeds
+8. Put into BIDS structure, specifically with events and evoked.fif files
+9. Generate MNE-report
