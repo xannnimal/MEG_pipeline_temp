@@ -118,20 +118,28 @@ if __name__ == '__main__':
     trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
     
     for file in raw_files:
-        raw = mne.io.read_raw_fif(os.path.join(subjects_dir,file),'default', preload=True)
-        ## Define filter type
-        prepros_type = 'sss-filter' 
-        [raw_pre, events] = pros_OPM_data(raw, trigger_chan, prepros_type)
-        
-        ## Get epochs and evoked response
-        tmin = -0.2  # start of each epoch (200ms before the trigger)
-        tmax = 0.6  # end of each epoch (600ms after the trigger)
-        epochs = mne.Epochs(raw_pre, events, tmin=tmin, tmax=tmax, preload=True)
-        evoked = epochs.average()
-        fig = evoked.plot_joint()
-        
+        if file.endswith(".fif"):
+            """Do OPM-MEG load and preprocess """
+            raw = mne.io.read_raw_fif(os.path.join(subjects_dir,file),'default', preload=True)
+            ## Define filter type
+            prepros_type = 'sss-filter' 
+            [raw_pre, events] = pros_OPM_data(raw, trigger_chan, prepros_type)
+            
+            ## Get epochs and evoked response
+            tmin = -0.2  # start of each epoch (200ms before the trigger)
+            tmax = 0.6  # end of each epoch (600ms after the trigger)
+            epochs = mne.Epochs(raw_pre, events, tmin=tmin, tmax=tmax, preload=True)
+            evoked = epochs.average()
+            fig = evoked.plot_joint()
+            
+        elif file.endswith(".ds"):
+            """ TODO: add specific CTF preprocessing after we figure out event ID issues
+            Do CTF-MEG load and preprocess """
+            raw = read_raw_ctf(os.path.join(subjects_dir,file), preload=True)
+        else:
+            print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
     
-    
+        
     #### STEPS TO ADD
     ## save events
     # mne.write_events( participant + '/' + participant + '_events.fif',events)
