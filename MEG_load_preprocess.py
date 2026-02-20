@@ -30,8 +30,7 @@ This module covers steps 1-4 of the full pipeline:
 
 # --- Dependencies -----------------------------------------------------------
 import mne
-from mne import combine_evoked
-from mne.datasets.brainstorm import bst_auditory
+import os
 from mne.io import read_raw_ctf
 from mne.minimum_norm import apply_inverse
 
@@ -41,53 +40,96 @@ from pathlib import Path
 
 
 # --- Helpers -----------------------------------------------------------------
-
-def get_OPM_data(rawfile, trigger_chan, prepros_type):
-    raw=mne.io.read_raw_fif(rawfile ,'default', preload=True)
-    ## find events
-    events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
-    ## always notch filter
+def _highpass_filter_opm(raw):
+    """ 'high-filter' = applies high-pass filter 3Hz ('Agressive'), low pass 40Hz, 60Hz notch """
+    # apply high-pass filter 
+    freq_min = 3
+    freq_max = 40
+    raw.load_data().filter(l_freq=freq_min, h_freq=freq_max)
+    # always notch filter
     meg_picks = mne.pick_types(raw.info, meg=True)
     raw.notch_filter(freqs=60, picks=meg_picks)
-    if prepros_type == 'high-filter':
-        # # apply high-pass filter 
-        freq_min = 3
-        freq_max = 40
-        raw.load_data().filter(l_freq=freq_min, h_freq=freq_max)
-    if prepros_type == 'ssp-filter':
-        freq_min = 3
-        freq_max = 40
-        raw.load_data().filter(l_freq=freq_min, h_freq=freq_max)
-        proj = mne.compute_proj_raw(raw, start=0, stop=None, duration=1, n_grad=0, n_mag=2, n_eeg=0, reject=None, flat=None, n_jobs=None, meg='separate', verbose=None)
-        raw = raw.add_proj(proj)
+    return raw
+    
+def _ssp_filter(raw):
+    """ 'ssp-filter' = applies high-pass filter 2Hz, low pass 40Hz, 60Hz notch, and SSP method """
+    # high pass
+    freq_min = 2
+    freq_max = 40
+    raw.load_data().filter(l_freq=freq_min, h_freq=freq_max)
+    # always notch filter
+    meg_picks = mne.pick_types(raw.info, meg=True)
+    raw.notch_filter(freqs=60, picks=meg_picks)
+    # SSP projector
+    proj = mne.compute_proj_raw(raw, start=0, stop=None, duration=1, n_grad=0, n_mag=1, n_eeg=0, reject=None, flat=None, n_jobs=None, meg='separate', verbose=None)
+    raw_proj = raw.copy().add_proj(proj)
+    return raw_proj
+
+def _sss_prepros(raw):
+    """ 'sss-filter' = applies high-pass filter 1Hz, low pass 40Hz, 60Hz notch, and SSS method """
+    freq_min = 1
+    freq_max = 40       
+    # # apply high-pass filter 
+    raw.load_data().filter(l_freq=freq_min, h_freq=freq_max)
     # # apply notch filter for 60Hz power lines
     meg_picks = mne.pick_types(raw.info, meg=True)
     raw.notch_filter(freqs=60, picks=meg_picks)
-    return raw,events
+    raw_sss = mne.preprocessing.maxwell_filter(raw, origin=(0., 0., 0.), int_order=8, ext_order=3, calibration=None, coord_frame='meg', regularize='in', ignore_ref=True, bad_condition='error', mag_scale=100.0, extended_proj=(), verbose=None)  
+    return raw_sss
+
+def pros_OPM_data(raw, trigger_chan, prepros_type):
+    """Load OPM raw data, find events on trigger chan, do specified preprocessing 
+
+    Parameters
+    ----------
+    raw: mne.Raw
+    trigger chan: str
+        name of the trigger channel
+    prepros_type: str
+        pick from the following options 
+        'high-filter' = applies high-pass filter 3Hz, low pass 40Hz, 60Hz notch filter.
+        'ssp-filter' = applies high-pass filter 2Hz, low pass 40Hz, 60Hz notch, and SSP proj from baseline
+        'sss-filter' = applies high-pass filter 1Hz, low pass 40Hz, 60Hz notch, and SSS method
+        more to come
+        
+    Returns
+    -------
+    rawp : mne.Raw with applied filters/projectors
+    events: arrary (event time x 3) containing event IDs and onsets
+    """
+    events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
+    ## preprocess
+    if prepros_type == 'high-filter':
+        rawp = _highpass_filter_opm(raw)
+    elif prepros_type == 'ssp-filter':
+        rawp = _ssp_filter(raw)
+    elif prepros_type == 'sss-filter':
+        rawp = _sss_prepros(raw)
+    else:
+        print("please pick preprocessing type from the defined options")
+    return rawp,events
 
 
 # --- Main (example usage) ---------------------------------------------------
-
 if __name__ == '__main__':
-    rawfiles = [Path('/Users/alexandria/Documents/STANFORD/FieldLine_tests/subjects/sub-XM/20260206_143328_sub-XM_file-xantone_raw.fif')]
+    subjects_dir = '/Users/alexandria/Documents/STANFORD/FieldLine_tests/subjects/sub-XM'
+    raw_files = ['20260206_143328_sub-XM_file-xantone_raw.fif']
     ## Define constants
     trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
     
-    for rawfile in rawfiles:
-        ## Load, get Events, and Filter Data ## 
+    for file in raw_files:
+        raw = mne.io.read_raw_fif(os.path.join(subjects_dir,file),'default', preload=True)
         ## Define filter type
-        # 'high-filter' = applies high-pass filter 3, low pass 40.
-        # 'ssp-filter' = applies high-pass filter 0.1, low pass 40, and SSP proj from baseline
-        # more to come
-        prepros_type = 'ssp-filter' 
-        [raw, events] = get_OPM_data(rawfile, trigger_chan, prepros_type)
+        prepros_type = 'sss-filter' 
+        [raw_pre, events] = pros_OPM_data(raw, trigger_chan, prepros_type)
         
         ## Get epochs and evoked response
         tmin = -0.2  # start of each epoch (200ms before the trigger)
         tmax = 0.6  # end of each epoch (600ms after the trigger)
-        epochs = mne.Epochs(raw, events, tmin=tmin, tmax=tmax, baseline=None, preload=True)
+        epochs = mne.Epochs(raw_pre, events, tmin=tmin, tmax=tmax, preload=True)
         evoked = epochs.average()
         fig = evoked.plot_joint()
+        
     
     
     #### STEPS TO ADD
