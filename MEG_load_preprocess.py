@@ -67,14 +67,18 @@ def _ssp_filter(raw):
 
 def _sss_prepros(raw):
     """ 'sss-filter' = applies high-pass filter 1Hz, low pass 40Hz, 60Hz notch, and SSS method """
-    freq_min = 1
-    freq_max = 40       
-    # # apply high-pass filter 
-    raw.load_data().filter(l_freq=freq_min, h_freq=freq_max)
-    # # apply notch filter for 60Hz power lines
+    # freq_min = 1
+    # freq_max = 40       
+    # # # apply high-pass filter 
+    # raw.load_data().filter(l_freq=freq_min, h_freq=freq_max)
+    # # # apply notch filter for 60Hz power lines
     meg_picks = mne.pick_types(raw.info, meg=True)
     raw.notch_filter(freqs=60, picks=meg_picks)
-    raw_sss = mne.preprocessing.maxwell_filter(raw, origin=(0., 0., 0.), int_order=8, ext_order=3, calibration=None, coord_frame='meg', regularize='in', ignore_ref=True, bad_condition='error', mag_scale=100.0, extended_proj=(), verbose=None)  
+    raw_sss = mne.preprocessing.maxwell_filter(raw, origin=(0., 0., 0.), int_order=8, ext_order=3, calibration=None, coord_frame='meg', regularize='in', ignore_ref=True, bad_condition='error', mag_scale=1.0, extended_proj=(), verbose=None)  
+    freq_min = 2
+    freq_max = 40       
+    # # apply high-pass filter 
+    raw_sss.load_data().filter(l_freq=freq_min, h_freq=freq_max)
     return raw_sss
 
 def pros_OPM_data(raw, trigger_chan, prepros_type):
@@ -90,7 +94,7 @@ def pros_OPM_data(raw, trigger_chan, prepros_type):
         'high-filter' = applies high-pass filter 3Hz, low pass 40Hz, 60Hz notch filter.
         'ssp-filter' = applies high-pass filter 2Hz, low pass 40Hz, 60Hz notch, and SSP proj from baseline
         'sss-filter' = applies high-pass filter 1Hz, low pass 40Hz, 60Hz notch, and SSS method
-        more to come
+        TODO: add Fosters Inverse with SSS
         
     Returns
     -------

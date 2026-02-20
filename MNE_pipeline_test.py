@@ -66,7 +66,7 @@ def _sss_prepros(raw):
     """ 'sss-filter' = applies high-pass filter 1Hz, low pass 40Hz, 60Hz notch, and SSS method """
     meg_picks = mne.pick_types(raw.info, meg=True)
     raw.notch_filter(freqs=60, picks=meg_picks)
-    raw_sss = mne.preprocessing.maxwell_filter(raw, origin=(0., 0., 0.), int_order=8, ext_order=3, calibration=None, coord_frame='meg', regularize='in', ignore_ref=True, bad_condition='error', mag_scale=1.0, extended_proj=(), verbose=None)  
+    raw_sss = mne.preprocessing.maxwell_filter(raw, origin=(0., 0., 0.), int_order=8, ext_order=3, calibration=None, coord_frame='meg', regularize='in', ignore_ref=True, bad_condition='error', mag_scale=100.0, extended_proj=(), verbose=None)  
     freq_min = 2
     freq_max = 40       
     raw_sss.load_data().filter(l_freq=freq_min, h_freq=freq_max)
@@ -477,7 +477,7 @@ if __name__ == '__main__':
             ## load OPM, find events, do preprocessing
             raw = mne.io.read_raw_fif(os.path.join(subjects_dir,file),'default', preload=True)
             ## Define filter type
-            prepros_type = 'sss-filter' 
+            prepros_type = 'ssp-filter' 
             [raw_pre, events] = pros_OPM_data(raw, trigger_chan, prepros_type)
             
         elif file.endswith(".ds"):
@@ -493,7 +493,11 @@ if __name__ == '__main__':
         tmax = 0.6  # end of each epoch (600ms after the trigger)
         epochs = mne.Epochs(raw_pre, events, tmin=tmin, tmax=tmax, preload=True)
         evoked = epochs.average()
-        fig = evoked.plot_joint()
+        
+        ## specify plotting args
+        ts_args = ts_args = dict(time_unit="s") # can specify limits as ylim=dict(mag=(-400, 400)))
+        topomap_args = dict(time_unit="s") # you can pass other args here, like 'vmin', 'vmax', 'cmap', etc.
+        fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title=prepros_type)
         
         # --- 4. Create covariance --------------------------------------------
         """ TODO: make/call correct covariance function """
