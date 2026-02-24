@@ -3,37 +3,55 @@
 C-SHARP MEG Forward & Inverse Pipeline
 Supports both CTF (UCSF) and FieldLine OPM data.
 
-## 1. Set up the YORC coregistration pipeline for FieldLine OPM Data
-In lieu of using other coreg methods (HPI coils, Polhemus, etc.), coregister FieldLine OPM sensor locations with head, create `-trans.fif` file and add `trans` object to `raw.info` structure of data saved from FieldLine. See https://github.com/wadelab/yorc-gui/blob/master/USER_GUIDE.md for more details and options
+## 1. FreeSurfer Setup & MRI Data Preprocessing
+Generate FreeSurfer-formatted surfaces from T1-weighted MRI scan `T1_<subject_id>.nii.gz` that are suitable for usage of MNE-Python
 
-### 1.A Install dependencies
-- Python 3.11+
-- `uv` for virtural environment management: https://docs.astral.sh/uv/ is recommended, but any manager will be fine
-- FreeSurfer
+[**FreeSurfer**](https://surfer.nmr.mgh.harvard.edu/) is a tool that:
+- Segments brain tissue (e.g., pial, white matter, cortex)
+- Reconstructs cortical surfaces
+- Outputs surface files with vertex coordinates in `(x, y, z)` space
 
-### 1.B Clone and Enter the YORC coregistration Repository
-```bash
-git clone https://github.com/wadelab/yorc-gui.git
-cd yorc-gui
-```
-can also clone using GitHub Desktop with this link: https://github.com/wadelab/yorc-gui.git
+### 1.A Setting Up FreeSurfer Environment (macOS/Linux) - SKIP if already set up!
 
-### 1.C Create Environment and Install Dependencies
-Use `uv` to manage virtual environments. While still in `yorc-gui` cloned folder, create `venv`:
-```bash
-uv venv
-source .venv/bin/activate
-uv pip install -r requirements.txt
-uv pip install -e .
-```
+**STEP 1: To make FreeSurfer accessible in your terminal:**
+1. Open your shell configuration file (e.g., `.zshrc` or `.bashrc`):
+   ```bash
+   nano ~/.zshrc  # or use ~/.bashrc if you're using bash
+2. Add the following lines at the end of the file (change the path to your local FreeSurfer directory):
+    ```bash
+    export FREESURFER_HOME=/Users/qyfeng/Downloads/freesurfer
+    source $FREESURFER_HOME/SetUpFreeSurfer.sh
+3. Reload your shell configuration:
+    ```bash
+    source ~/.zshrc  # or ~/.bashrc
+4. confirm that FreeSurfer is correctly installed:
+    ```bash
+    recon-all -version
 
-Notes:
-- `requirements.txt` pins compatible versions (including SciPy for MNE compatibility).
-- `uv pip install -e .` installs the local `yorc` package in editable mode.
+**STEP 2: Register for a FreeSurfer License**
+1. Go to the official FreeSurfer registration page: [http://surfer.nmr.mgh.harvard.edu/registration.html](http://surfer.nmr.mgh.harvard.edu/registration.html)
 
-Deactivate `venv` now that it is setup.
+2. Enter your information and download the `license.txt` file.
 
-### 1.D FreeSurfer scalp surface to STL conversion
+3. Save the file to your `$FREESURFER_HOME` directory (the same path you exported earlier).  
+   For example:
+   ```bash
+   mv ~/Downloads/license.txt $FREESURFER_HOME
+
+Now, FreeSurfer environment has been successfully setup! 
+
+### 1.B Use FreeSurfer commands to process anatomical data
+takes the raw T1 NIfTI, and runs full cortical reconstruction pipeline:
+    ```bash
+    recon-all -s [subject_id] -i /path/to/T1.nii.gz -all
+
+Once complete, FreeSurfer will output surface and volume files under:
+    ```bash
+    $SUBJECTS_DIR/<subject_id>/
+
+> **Note:** The full FreeSurfer processing (`recon-all`) can take 6–8 hours to complete, depending on your machine.
+
+### 1.C FreeSurfer scalp surface to STL conversion
 Generate `mriscalp.stl` and relevent files for forward and inverse modeling
 
 Always run below (as example) to make sure Freesurfer is setup correctly
@@ -56,7 +74,58 @@ mris_convert ${SUBJECTS_DIR}/${subject}/surf/lh.seghead \
              ${SUBJECTS_DIR}/${subject}/surf/mriscalp.stl
 ```
 
-### 1.E Prepare Input Files
+### (Optional) 1.D Processing FLASH images
+
+from a FLASH scan (in our case, it is a FSPGR - Fast Spoiled Gradient Echo, Multi-Echo), we acquire two files: 1 ``.dicom.zip``, 1 ``.nii.gz``. They are used for bias field correction and improve surface reconstruction, which is usually better than using T1 alone.
+
+**STEP1: Inspect the number of echoes, using ``FSL`` package to check raw NifTi files:**
+
+0. download FSL on a Linux machine:
+```bash
+curl -Ls https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/releases/getfsl.sh | sh -s
+```
+1. check FLASH file dimension
+```bash
+fslhd FSPGR_ME_8Echoes/*.nii.gz
+```
+look for the ``dim4``. If it is 4D, we will need to split it via
+
+**STEP2: Split into single echoes, generating multiple ``NifTi`` files:**
+```bash
+fslsplit FSPGR_ME_8Echoes/yourfile.nii.gz flash_
+```
+output are flash_000*.nii.gz in your pwd, each one corresponds to a single echo (or flip angle)
+
+
+## 2. Set up the YORC coregistration pipeline for FieldLine OPM Data
+In lieu of using other coreg methods (HPI coils, Polhemus, etc.), coregister FieldLine OPM sensor locations with head, create `-trans.fif` file and add `trans` object to `raw.info` structure of data saved from FieldLine. See https://github.com/wadelab/yorc-gui/blob/master/USER_GUIDE.md for more details and options
+
+### 2.A Install dependencies
+- Python 3.11+
+- `uv` for virtural environment management: https://docs.astral.sh/uv/ is recommended, but any manager will be fine
+- FreeSurfer
+
+### 2.B Clone and Enter the YORC coregistration Repository
+```bash
+git clone https://github.com/wadelab/yorc-gui.git
+cd yorc-gui
+```
+can also clone using GitHub Desktop with this link: https://github.com/wadelab/yorc-gui.git
+
+### 2.C Create Environment and Install Dependencies
+Use `uv` to manage virtual environments. While still in `yorc-gui` cloned folder, create `venv`:
+```bash
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
+uv pip install -e .
+```
+
+Notes:
+- `requirements.txt` pins compatible versions (including SciPy for MNE compatibility).
+- `uv pip install -e .` installs the local `yorc` package in editable mode.
+
+### 2.D Prepare Input Files
 
 You should now have these 4 files:
 - `inside` LIDAR mesh/point cloud (`.ply/.stl/.obj/.pcd`)  
