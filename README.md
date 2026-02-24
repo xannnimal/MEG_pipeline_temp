@@ -31,6 +31,8 @@ Notes:
 - `requirements.txt` pins compatible versions (including SciPy for MNE compatibility).
 - `uv pip install -e .` installs the local `yorc` package in editable mode.
 
+Deactivate `venv` now that it is setup.
+
 ### 1.D FreeSurfer scalp surface to STL conversion
 Generate `mriscalp.stl` and relevent files for forward and inverse modeling
 
@@ -67,7 +69,12 @@ You should now have these 4 files:
 ## 3. Do YORC coregistration with Lidar camera scans
 Generate -trans.fif and add trans object to raw data info structure by running coregistration code. NOTE: this will overwite the original raw file to include the `trans` object, reccommended to save a copy of original raw, umodified, in a separate place.
 
-To run `YORC.py` or `manual_YORC.py`, you will be prompted to pick points on each of the 4 files used to coreg them all together. First, `cd ..` out to your home or user directory, then run:
+In the terminal, navigate to the cloned `yorc-gui` folder we created earlier and activate the virtual environment:
+```bash
+source .venv/bin/activate
+```
+
+To run `YORC.py` or `manual_YORC.py`, you will be prompted to pick points on each of the 4 files used to coreg them all together. After activiating the environment, `cd ..` out to your home or user directory, then run:
 
 ```bash
 python3 /"your_path_here"/manual_YORC.py
