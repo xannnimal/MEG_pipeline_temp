@@ -42,13 +42,13 @@ Now, FreeSurfer environment has been successfully setup!
 
 ### 1.B Use FreeSurfer commands to process anatomical data
 takes the raw T1 NIfTI, and runs full cortical reconstruction pipeline:
-    ```bash
-    recon-all -s [subject_id] -i /path/to/T1.nii.gz -all
-
+  ```bash
+  recon-all -s [subject_id] -i /path/to/T1.nii.gz -all
+  ```
 Once complete, FreeSurfer will output surface and volume files under:
-    ```bash
-    $SUBJECTS_DIR/<subject_id>/
-
+  ```bash
+  $SUBJECTS_DIR/<subject_id>/
+  ```
 > **Note:** The full FreeSurfer processing (`recon-all`) can take 6–8 hours to complete, depending on your machine.
 
 ### 1.C FreeSurfer scalp surface to STL conversion
