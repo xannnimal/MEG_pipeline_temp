@@ -153,8 +153,9 @@ python3 /"your_path_here"/manual_YORC.py
   -im /"your_path_here"/subID_02_H.ply
   -s /"your_path_here"/mriscalp.stl
   -m /"your_path_here"/subID-raw.fif
-  -lm 1 2 3 4 5 6 
+  -lm 1 2 3 4 5 6 7
 ```
+> **Note:** `-lm 1 2 3 4 5 6 7` specifices the landmarks visibile on the helmet Lidar scan. Can use 6 if the scan missed one, but 7 is ideal
 
 Follow prompts in terminal
 - `Shift + Left Click`: add point
