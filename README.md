@@ -81,7 +81,8 @@ python3 /"your_path_here"/manual_YORC.py
   -om /"your_path_here"/subID_01_R.ply
   -im /"your_path_here"/subID_02_H.ply
   -s /"your_path_here"/mriscalp.stl
-  -m /"your_path_here"/subID-raw.fif -lm 1 2 3 4 5 6
+  -m /"your_path_here"/subID-raw.fif
+  -lm 1 2 3 4 5 6 
 ```
 
 If you don't want to run in terminal, York also has a GUI to do this, more info on it here: https://github.com/wadelab/yorc-gui/blob/master/GUI_USAGE.md
