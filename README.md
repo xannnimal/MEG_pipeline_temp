@@ -136,7 +136,9 @@ You should now have these 4 files:
 - `meg` raw FIF (`.fif`)
 
 ## 3. Do YORC coregistration with Lidar camera scans
-Generate -trans.fif and add trans object to raw data info structure by running coregistration code. NOTE: this will overwite the original raw file to include the `trans` object, reccommended to save a copy of original raw, umodified, in a separate place.
+Generate -trans.fif and add trans object to raw data info structure by running coregistration code. 
+
+> **Note:** This process will overwite the original raw file to include the `trans` object. It is reccommended to save a copy of original, unmodified raw file(s)
 
 In the terminal, navigate to the cloned `yorc-gui` folder we created earlier and activate the virtual environment:
 ```bash
@@ -159,7 +161,7 @@ Follow prompts in terminal
 - `Shift + Right Click`: remove last point
 - `q`: move to next step
 
-If you don't want to run in terminal, York also has a GUI to do this, more info on it here: https://github.com/wadelab/yorc-gui/blob/master/GUI_USAGE.md
+> **Note:** If you don't want to run in terminal, York also has a GUI to do this, more info on it here: https://github.com/wadelab/yorc-gui/blob/master/GUI_USAGE.md
 
 ## 4. Run pipeline
 1. Load data (CTF vs FIF files). For FieldLine OPM data, be sure to load the updated raw data with `trans` object added
