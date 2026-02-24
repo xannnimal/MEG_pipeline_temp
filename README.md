@@ -154,6 +154,11 @@ python3 /"your_path_here"/manual_YORC.py
   -lm 1 2 3 4 5 6 
 ```
 
+Follow prompts in terminal
+- `Shift + Left Click`: add point
+- `Shift + Right Click`: remove last point
+- `q`: move to next step
+
 If you don't want to run in terminal, York also has a GUI to do this, more info on it here: https://github.com/wadelab/yorc-gui/blob/master/GUI_USAGE.md
 
 ## 4. Run pipeline
