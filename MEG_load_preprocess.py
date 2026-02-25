@@ -126,7 +126,7 @@ if __name__ == '__main__':
             """Do OPM-MEG load and preprocess """
             raw = mne.io.read_raw_fif(os.path.join(subjects_dir,file),'default', preload=True)
             ## Define filter type
-            prepros_type = 'sss-filter' 
+            prepros_type = 'high-filter' 
             [raw_pre, events] = pros_OPM_data(raw, trigger_chan, prepros_type)
             
             ## Get epochs and evoked response

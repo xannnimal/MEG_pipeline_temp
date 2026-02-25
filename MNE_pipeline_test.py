@@ -30,7 +30,6 @@ from pathlib import Path
 
 import mne
 from mne.io import read_raw_ctf
-from mne.minimum_norm import apply_inverse
 from mne import Covariance
 from mne.minimum_norm import (make_inverse_operator, write_inverse_operator, apply_inverse)
 from mne.beamformer import make_lcmv, apply_lcmv
@@ -43,7 +42,7 @@ warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 # --- Load, find events, preprocess -------------------------------------------
 def _highpass_filter_opm(raw):
     """ 'high-filter' = applies high-pass filter 3Hz ('Agressive'), low pass 40Hz, 60Hz notch """
-    freq_min = 3
+    freq_min = 1
     freq_max = 40
     raw.load_data().filter(l_freq=freq_min, h_freq=freq_max)
     meg_picks = mne.pick_types(raw.info, meg=True)
@@ -72,6 +71,13 @@ def _sss_prepros(raw):
     raw_sss.load_data().filter(l_freq=freq_min, h_freq=freq_max)
     return raw_sss
 
+def _eog_artifact(raw):
+    """TODO: https://mne.tools/stable/auto_tutorials/preprocessing/20_rejecting_bad_data.html """
+    eog_event_id = 512
+    eog_events = mne.preprocessing.find_eog_events(raw, eog_event_id)
+    raw.add_events(eog_events, "STI 014")
+    return raw 
+
 def pros_OPM_data(raw, trigger_chan, prepros_type):
     """Load OPM raw data, find events on trigger chan, do specified preprocessing 
 
@@ -82,6 +88,7 @@ def pros_OPM_data(raw, trigger_chan, prepros_type):
         name of the trigger channel
     prepros_type: str
         pick from the following options 
+        'no-filter' = no filters applied
         'high-filter' = applies high-pass filter 3Hz, low pass 40Hz, 60Hz notch filter.
         'ssp-filter' = applies high-pass filter 2Hz, low pass 40Hz, 60Hz notch, and SSP proj from baseline
         'sss-filter' = applies high-pass filter 1Hz, low pass 40Hz, 60Hz notch, and SSS method
@@ -100,6 +107,8 @@ def pros_OPM_data(raw, trigger_chan, prepros_type):
         rawp = _ssp_filter(raw)
     elif prepros_type == 'sss-filter':
         rawp = _sss_prepros(raw)
+    elif prepros_type == 'no-filter':
+        rawp = raw
     else:
         print("please pick preprocessing type from the defined options")
     return rawp,events
@@ -466,8 +475,15 @@ def _pseudo_inverse_custom(subject, fwd, evoked, snr, fixed_ori):
 # --- Main (example usage) ----------------------------------------------------
 if __name__ == '__main__':
     # subjects_dir = Path(os.environ["SUBJECTS_DIR"])
-    subjects_dir = '/Users/alexandria/Documents/STANFORD/FieldLine_tests/subjects/sub-XM'
-    raw_files = ['20260206_143328_sub-XM_file-xantone_raw.fif']
+    # subjects_dir = '/Users/alexandria/Documents/STANFORD/FieldLine_tests/subjects/sub-XM'
+    # raw_files = ['20260206_143328_sub-XM_file-xantone_raw.fif']
+    
+    ## AN, checkers visual, 5 Feb 2026
+    subjects_dir = '/Users/alexandria/Documents/STANFORD/FieldLine_tests/OPMtest_0205/checkers/sub-AW'
+    raw_files = ['20260205_151229_sub-AW_file-awcheckers1_raw.fif', 
+                 '20260205_152601_sub-AW_file-psuedofonts_raw.fif',
+                 '20260205_153325_sub-AW_file-xDivaRetinotopy_raw.fif']
+    
     ## Define constants
     trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
     
@@ -477,27 +493,28 @@ if __name__ == '__main__':
             ## load OPM, find events, do preprocessing
             raw = mne.io.read_raw_fif(os.path.join(subjects_dir,file),'default', preload=True)
             ## Define filter type
-            prepros_type = 'ssp-filter' 
+            prepros_type = 'high-filter' 
             [raw_pre, events] = pros_OPM_data(raw, trigger_chan, prepros_type)
+            picks = 'mag'
             
         elif file.endswith(".ds"):
             """ TODO: add specific CTF preprocessing after we figure out event ID issues
             Do CTF-MEG load and preprocess """
             raw = read_raw_ctf(os.path.join(subjects_dir,file), preload=True)
+            picks = 'grad'
         else:
             print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
         
         # --- 3. Make Epochs and Evokeds --------------------------------------
-        """TODO: do this for each event/condition type """
         tmin = -0.2  # start of each epoch (200ms before the trigger)
         tmax = 0.6  # end of each epoch (600ms after the trigger)
-        epochs = mne.Epochs(raw_pre, events, tmin=tmin, tmax=tmax, preload=True)
+        epochs = mne.Epochs(raw_pre, events, picks=[picks], tmin=tmin, tmax=tmax, preload=True)
         evoked = epochs.average()
         
         ## specify plotting args
         ts_args = ts_args = dict(time_unit="s") # can specify limits as ylim=dict(mag=(-400, 400)))
         topomap_args = dict(time_unit="s") # you can pass other args here, like 'vmin', 'vmax', 'cmap', etc.
-        fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title=prepros_type)
+        fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file + ' with ' + prepros_type)
         
         # --- 4. Create covariance --------------------------------------------
         """ TODO: make/call correct covariance function """
