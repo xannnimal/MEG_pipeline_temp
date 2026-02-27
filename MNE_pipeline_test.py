@@ -479,10 +479,14 @@ if __name__ == '__main__':
     # raw_files = ['20260206_143328_sub-XM_file-xantone_raw.fif']
     
     ## AN, checkers visual, 5 Feb 2026
-    subjects_dir = '/Users/alexandria/Documents/STANFORD/FieldLine_tests/OPMtest_0205/checkers/sub-AW'
-    raw_files = ['20260205_151229_sub-AW_file-awcheckers1_raw.fif', 
-                 '20260205_152601_sub-AW_file-psuedofonts_raw.fif',
-                 '20260205_153325_sub-AW_file-xDivaRetinotopy_raw.fif']
+    subjects_dir = '/Users/alexandria/Documents/STANFORD/FieldLine_tests/OPMtest_0205/data/'
+    raw_files = ['20260205_104804_sub-TN_file-vistest_raw.fif']
+    
+    ## AW
+    subjects_dir = '/Users/alexandria/Documents/STANFORD/FieldLine_tests/OPMtest_0205/checkers/sub-AW/' 
+    raw_files = ['20260205_152601_sub-AW_file-psuedofonts_raw.fif',
+                 '20260205_153325_sub-AW_file-xDivaRetinotopy_raw.fif',
+                 '20260205_151229_sub-AW_file-awcheckers1_raw.fif']
     
     ## Define constants
     trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
