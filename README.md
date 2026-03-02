@@ -98,11 +98,11 @@ output are flash_000*.nii.gz in your pwd, each one corresponds to a single echo 
 
 
 ## 2. Set up the YORC coregistration pipeline for FieldLine OPM Data
-In lieu of using other coreg methods (HPI coils, Polhemus, etc.), coregister FieldLine OPM sensor locations with head, create `-trans.fif` file and add `trans` object to `raw.info` structure of data saved from FieldLine. See https://github.com/wadelab/yorc-gui/blob/master/USER_GUIDE.md for more details and options
+In lieu of using other coreg methods (HPI coils, Polhemus, etc.), coregister FieldLine OPM sensor locations with head, create `-trans.fif` file and add `trans` object to `raw.info` structure of data saved from FieldLine. See [Wadelab/yorc-gui/User_Guide](https://github.com/wadelab/yorc-gui/blob/master/USER_GUIDE.md) for more details and options
 
 ### 2.A Install dependencies
 - Python 3.11+
-- `uv` for virtural environment management: https://docs.astral.sh/uv/ is recommended, but any manager will be fine
+- [uv](https://docs.astral.sh/uv/) for virtural environment management is recommended, but any manager will be fine
 - FreeSurfer
 
 ### 2.B Clone and Enter the YORC coregistration Repository
@@ -110,7 +110,7 @@ In lieu of using other coreg methods (HPI coils, Polhemus, etc.), coregister Fie
 git clone https://github.com/wadelab/yorc-gui.git
 cd yorc-gui
 ```
-can also clone using GitHub Desktop with this link: https://github.com/wadelab/yorc-gui.git
+can also clone using GitHub Desktop with this link: [https://github.com/wadelab/yorc-gui.git](https://github.com/wadelab/yorc-gui.git)
 
 ### 2.C Create Environment and Install Dependencies
 Use `uv` to manage virtual environments. While still in `yorc-gui` cloned folder, create `venv`:
@@ -162,7 +162,10 @@ Follow prompts in terminal
 - `Shift + Right Click`: remove last point
 - `q`: move to next step
 
-> **Note:** If you don't want to run in terminal, York also has a GUI to do this, more info on it here: https://github.com/wadelab/yorc-gui/blob/master/GUI_USAGE.md
+Or, you can run in York GUI for more visuals and troubleshooting. In terminal: 
+`uv run yorc-tripanel-gui`
+Then, select the same four files as above and follow the same steps as prompted. More infor and instruction at [**GUI usage**](https://github.com/wadelab/yorc-gui/blob/master/GUI_USAGE.md)
+
 
 ## 4. Run pipeline
 1. Load data (CTF vs FIF files). For FieldLine OPM data, be sure to load the updated raw data with `trans` object added
