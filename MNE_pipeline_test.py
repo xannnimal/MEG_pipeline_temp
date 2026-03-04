@@ -475,29 +475,31 @@ def _pseudo_inverse_custom(subject, fwd, evoked, snr, fixed_ori):
 # --- Main (example usage) ----------------------------------------------------
 if __name__ == '__main__':
     # subjects_dir = Path(os.environ["SUBJECTS_DIR"])
-    # subjects_dir = '/Users/alexandria/Documents/STANFORD/FieldLine_tests/subjects/sub-XM'
-    # raw_files = ['20260206_143328_sub-XM_file-xantone_raw.fif']
+    subjects_dir = '/Users/alexandria/Documents/STANFORD/DATA/FieldLine_tests/OPMtest_0205/sub-XM'
+    raw_files = ['20260206_143328_sub-XM_file-xantone_raw.fif']
     
     ## AN, checkers visual, 5 Feb 2026
-    subjects_dir = '/Users/alexandria/Documents/STANFORD/FieldLine_tests/OPMtest_0205/data/'
-    raw_files = ['20260205_104804_sub-TN_file-vistest_raw.fif']
+    # subjects_dir = '/Users/alexandria/Documents/STANFORD/DATA/FieldLine_tests/OPMtest_0205/data/'
+    # raw_files = ['20260205_104804_sub-TN_file-vistest_raw.fif',
+    #              '20260205_104804_sub-TN_file-vistest_s002gui_raw.fif']
+    # trans = subjects_dir / "20260205_104804_sub-TN_file-vistest_s002gui_raw_trans.fif"
     
     ## AW
-    subjects_dir = '/Users/alexandria/Documents/STANFORD/FieldLine_tests/OPMtest_0205/checkers/sub-AW/' 
-    raw_files = ['20260205_152601_sub-AW_file-psuedofonts_raw.fif',
-                 '20260205_153325_sub-AW_file-xDivaRetinotopy_raw.fif',
-                 '20260205_151229_sub-AW_file-awcheckers1_raw.fif']
+    # subjects_dir = '/Users/alexandria/Documents/STANFORD/FieldLine_tests/OPMtest_0205/checkers/sub-AW/' 
+    # raw_files = ['20260205_152601_sub-AW_file-psuedofonts_raw.fif',
+    #              '20260205_153325_sub-AW_file-xDivaRetinotopy_raw.fif',
+    #              '20260205_151229_sub-AW_file-awcheckers1_raw.fif']
     
     ## Define constants
     trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
+    ## Define filter type
+    prepros_type = 'high-filter' 
     
     for file in raw_files:
         # --- 1. and 2. Load data, find events, and preprocess ----------------
         if file.endswith(".fif"):
             ## load OPM, find events, do preprocessing
             raw = mne.io.read_raw_fif(os.path.join(subjects_dir,file),'default', preload=True)
-            ## Define filter type
-            prepros_type = 'high-filter' 
             [raw_pre, events] = pros_OPM_data(raw, trigger_chan, prepros_type)
             picks = 'mag'
             
@@ -509,7 +511,15 @@ if __name__ == '__main__':
         else:
             print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
         
+        # --- 2.A set up Events -----------------------------------------------
+        ## ICA for eyeblinks in precprossessing 
+        ## save events
+        # mne.write_events( participant + '/' + participant + '_events.fif',events)
+        ## define triggers
+        # event_id = dict(<cond1> = 1, <cond2> = 2, <cond3> = 16, <cond4> = 32)  
+        
         # --- 3. Make Epochs and Evokeds --------------------------------------
+        sfreq = raw.info["sfreq"]
         tmin = -0.2  # start of each epoch (200ms before the trigger)
         tmax = 0.6  # end of each epoch (600ms after the trigger)
         epochs = mne.Epochs(raw_pre, events, picks=[picks], tmin=tmin, tmax=tmax, preload=True)
@@ -521,15 +531,30 @@ if __name__ == '__main__':
         fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file + ' with ' + prepros_type)
         
         # --- 4. Create covariance --------------------------------------------
-        """ TODO: make/call correct covariance function """
-        
+        noise_cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank=None)
+        # cov = mne.cov.regularize(cov, evoked.info, mag=0.05, grad = 0.05, proj = True, exclude = 'bads')
+
+
         # --- 5. Forward solution ---------------------------------------------
         #fwd = make_forward(subject_id, trans, evoked, subjects_dir=subjects_dir)
+        # fwd = mne.make_forward_solution(
+        #     file,
+        #     trans=trans,
+        #     src=src,
+        #     bem=bem,
+        #     meg=True,
+        #     eeg=False,
+        #     mindist=5.0,
+        #     n_jobs=None,
+        #     verbose=True,
+        # )
         
         
         # --- 6. Inverse solution ---------------------------------------------
         #stc, inv_op = make_inverse(subjects_dir, subject_id, fwd, evoked, noise_cov)
-        
+        # inv = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, cov, loose = None, depth = None, fixed = False)
+        ## apply inverse for each condition 
+                
         
         # --- 7. Apply inverse to evokeds -------------------------------------
         #stc, inv_op = make_inverse(subjects_dir, subject_id, fwd, evoked, noise_cov)
@@ -539,23 +564,14 @@ if __name__ == '__main__':
         #stc, inv_op = make_inverse(subjects_dir, subject_id, fwd, evoked, noise_cov)
         
         # --- 9. Generate and save MNE Report ---------------------------------
+        report = mne.Report(title="Raw example")
+        report.add_raw(raw=raw, title= file , psd=True)
+        report.add_events(events=events, title='Events from "events"', sfreq=sfreq)
+        report.add_epochs(epochs=epochs, title='Epochs from "epochs"')
+        report.add_evokeds(evokeds=evoked,titles= 'Evoked with ' + prepros_type)
+        report.add_covariance(cov=noise_cov, info=raw.info, title="Covariance")
+        report.save(file + "report_raw.html", overwrite=True)
         
-        
-        
-        
-#### STEPS TO ADD
-## ICA for eyeblinks in precprossessing 
-## save events
-# mne.write_events( participant + '/' + participant + '_events.fif',events)
-## define triggers
-# event_id = dict(<cond1> = 1, <cond2> = 2, <cond3> = 16, <cond4> = 32)  
-## compute covariance and write to file
-# cov = mne.cov.compute_covariance(epochs, 0)
-# cov = mne.cov.regularize(cov, evoked.info, mag=0.05, grad = 0.05, proj = True, exclude = 'bads')
-## make foward solution
-# fwd = mne.make_forward_solution(info = info, mri = mri, src = src, bem = bem, fname = fname, meg = True, eeg = False, overwrite = True)
-## make inverse operator 
-# inv = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, cov, loose = None, depth = None, fixed = False)
-## apply inverse for each condition 
-        
+
+
 
