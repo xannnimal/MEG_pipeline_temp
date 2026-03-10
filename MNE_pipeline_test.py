@@ -475,20 +475,20 @@ def _pseudo_inverse_custom(subject, fwd, evoked, snr, fixed_ori):
 # --- Main (example usage) ----------------------------------------------------
 if __name__ == '__main__':
     # subjects_dir = Path(os.environ["SUBJECTS_DIR"])
-    subjects_dir = '/Users/alexandria/Documents/STANFORD/DATA/FieldLine_tests/OPMtest_0205/sub-XM'
-    raw_files = ['20260206_143328_sub-XM_file-xantone_raw.fif']
+    # subjects_dir = '/Users/alexandria/Documents/STANFORD/DATA/FieldLine_tests/OPMtest_0205/sub-XM'
+    # raw_files = ['20260206_143328_sub-XM_file-xantone_raw.fif']
     
     ## AN, checkers visual, 5 Feb 2026
-    # subjects_dir = '/Users/alexandria/Documents/STANFORD/DATA/FieldLine_tests/OPMtest_0205/data/'
-    # raw_files = ['20260205_104804_sub-TN_file-vistest_raw.fif',
-    #              '20260205_104804_sub-TN_file-vistest_s002gui_raw.fif']
-    # trans = subjects_dir / "20260205_104804_sub-TN_file-vistest_s002gui_raw_trans.fif"
-    
-    ## AW
-    # subjects_dir = '/Users/alexandria/Documents/STANFORD/FieldLine_tests/OPMtest_0205/checkers/sub-AW/' 
-    # raw_files = ['20260205_152601_sub-AW_file-psuedofonts_raw.fif',
-    #              '20260205_153325_sub-AW_file-xDivaRetinotopy_raw.fif',
-    #              '20260205_151229_sub-AW_file-awcheckers1_raw.fif']
+    sample_dir = '/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_MultimodalImaging/pilots/VWFA/sub-S002/'
+    raw_files = ['20260305_150619_sub-NL0034_file-NL0034_raw.fif']
+                #['20260305_150619_sub-NL0034_file-NL0034_raw.fif']
+                #['20260305_154343_sub-S002_file-S002_raw.fif']
+                 #'20260305_153136_sub-S002_file-S002-lidar2_raw.fif']
+    trans = os.path.join(sample_dir,'20260305_150619_sub-NL0034_file-NL0034_raw_trans.fif')
+
+    # The paths to Freesurfer reconstructions
+    subjects_dir = '/Users/alexandria/Documents/STANFORD/subjects/'
+    subject = 's002'
     
     ## Define constants
     trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
@@ -499,14 +499,17 @@ if __name__ == '__main__':
         # --- 1. and 2. Load data, find events, and preprocess ----------------
         if file.endswith(".fif"):
             ## load OPM, find events, do preprocessing
-            raw = mne.io.read_raw_fif(os.path.join(subjects_dir,file),'default', preload=True)
+            raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
             [raw_pre, events] = pros_OPM_data(raw, trigger_chan, prepros_type)
+            info = raw_pre.info
             picks = 'mag'
             
         elif file.endswith(".ds"):
             """ TODO: add specific CTF preprocessing after we figure out event ID issues
             Do CTF-MEG load and preprocess """
             raw = read_raw_ctf(os.path.join(subjects_dir,file), preload=True)
+            raw.apply_gradient_compensation(3)
+            info = raw_pre.info
             picks = 'grad'
         else:
             print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
@@ -517,9 +520,24 @@ if __name__ == '__main__':
         # mne.write_events( participant + '/' + participant + '_events.fif',events)
         ## define triggers
         # event_id = dict(<cond1> = 1, <cond2> = 2, <cond3> = 16, <cond4> = 32)  
-        
-        # --- 3. Make Epochs and Evokeds --------------------------------------
         sfreq = raw.info["sfreq"]
+        fig = mne.viz.plot_events(events, sfreq=raw.info["sfreq"], first_samp=raw.first_samp)
+
+        
+        # --- 2.B visualize sensors alignment ---------------------------------
+        # Here we look at the dense head, which isn't used for BEM computations but
+        # is useful for coregistration.
+        mne.viz.plot_alignment(
+            info,
+            trans=trans,
+            subject=subject,
+            dig=True,
+            meg=["helmet", "sensors"],
+            subjects_dir=subjects_dir,
+            surfaces="head-dense",
+            )
+
+        # --- 3. Make Epochs and Evokeds --------------------------------------
         tmin = -0.2  # start of each epoch (200ms before the trigger)
         tmax = 0.6  # end of each epoch (600ms after the trigger)
         epochs = mne.Epochs(raw_pre, events, picks=[picks], tmin=tmin, tmax=tmax, preload=True)
@@ -536,18 +554,23 @@ if __name__ == '__main__':
 
 
         # --- 5. Forward solution ---------------------------------------------
-        #fwd = make_forward(subject_id, trans, evoked, subjects_dir=subjects_dir)
-        # fwd = mne.make_forward_solution(
-        #     file,
-        #     trans=trans,
-        #     src=src,
-        #     bem=bem,
-        #     meg=True,
-        #     eeg=False,
-        #     mindist=5.0,
-        #     n_jobs=None,
-        #     verbose=True,
-        # )
+        # fwd = make_forward(subject, trans, evoked, subjects_dir)
+        src = mne.setup_source_space(subject, spacing="oct6", add_dist="patch", subjects_dir=subjects_dir)
+        conductivity = (0.3,)  # for single layer
+        # conductivity = (0.3, 0.006, 0.3)  # for three layers
+        model = mne.make_bem_model(subject=subject, ico=4, conductivity=conductivity, subjects_dir=subjects_dir)
+        bem = mne.make_bem_solution(model)
+        fwd = mne.make_forward_solution(
+            os.path.join(sample_dir,file),
+            trans=trans,
+            src=src,
+            bem=bem,
+            meg=True,
+            eeg=False,
+            mindist=5.0,
+            n_jobs=None,
+            verbose=True,
+        )
         
         
         # --- 6. Inverse solution ---------------------------------------------
