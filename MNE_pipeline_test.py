@@ -507,7 +507,7 @@ if __name__ == '__main__':
         elif file.endswith(".ds"):
             """ TODO: add specific CTF preprocessing after we figure out event ID issues
             Do CTF-MEG load and preprocess """
-            raw = read_raw_ctf(os.path.join(subjects_dir,file), preload=True)
+            raw = read_raw_ctf(os.path.join(sample_dir,file), preload=True)
             raw.apply_gradient_compensation(3)
             info = raw_pre.info
             picks = 'grad'
