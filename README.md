@@ -66,7 +66,7 @@ Then, if you already ran `recon-all`:
 export SUBJECTS_DIR=/path/to/subjects_dir
 subject=subj01
 
-# Create scalp/head surface if needed
+# Create scalp/head surface if needed, this will generate lh.seghead and rh.seghead
 mkheadsurf -subjid ${subject}
 
 # Convert surface to STL
