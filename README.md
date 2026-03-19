@@ -52,7 +52,7 @@ Once complete, FreeSurfer will output surface and volume files under:
 > **Note:** The full FreeSurfer processing (`recon-all`) can take 6–8 hours to complete, depending on your machine.
 
 ### 1.C FreeSurfer scalp surface to STL conversion
-Generate `mriscalp.stl` and relevent files for forward and inverse modeling
+Generate `mriscalp.stl` used in coregsitration with the 3D RevoPoint scanner results and MRI
 
 Always run below (as example) to make sure Freesurfer is setup correctly
 ```bash
@@ -73,8 +73,17 @@ mkheadsurf -subjid ${subject}
 mris_convert ${SUBJECTS_DIR}/${subject}/surf/lh.seghead \
              ${SUBJECTS_DIR}/${subject}/surf/mriscalp.stl
 ```
+### 1.D Run MNE Watershed to create BEM files
+These files are used for forward and inverse modeling
+```bash
+export SUBJECTS_DIR=/path/to/subjects_dir
+subject=subj01
 
-### (Optional) 1.D Processing FLASH images
+mne watershed_bem -d $SUBJECTS_DIR -s subject --overwrite
+```
+Files will save in ```SUBJECTS_DIR/subject/bem```
+
+### (Optional) 1.E Processing FLASH images
 
 from a FLASH scan (in our case, it is a FSPGR - Fast Spoiled Gradient Echo, Multi-Echo), we acquire two files: 1 ``.dicom.zip``, 1 ``.nii.gz``. They are used for bias field correction and improve surface reconstruction, which is usually better than using T1 alone.
 
@@ -132,7 +141,7 @@ You should now have these 4 files:
   Example: scan with participant in helmet
 - `outside` LIDAR mesh/point cloud (`.ply/.stl/.obj/.pcd`)  
   Example: scan without helmet
-- `mri scalp` surface (`.stl` or `.fif` or mesh formats accepted by GUI)
+- `mri scalp` surface (`.stl` reccomended or `.fif` or mesh formats accepted by GUI)
 - `meg` raw FIF (`.fif`)
 
 ## 3. Do YORC coregistration with Lidar camera scans
@@ -145,7 +154,15 @@ In the terminal, navigate to the cloned `yorc-gui` folder we created earlier and
 source .venv/bin/activate
 ```
 
-To run `YORC.py` or `manual_YORC.py`, you will be prompted to pick points on each of the 4 files used to coreg them all together. After activiating the environment, `cd ..` out to your home or user directory, then run:
+Open York GUI for more visuals and troubleshooting. 
+In terminal, `cd ..` back to "home" or "user", then launch GUI:
+```uv run yorc-tripanel-gui```
+Then, select the same four files (with path names described from "Users/") as above and follow the steps as prompted. These will ask you to pick the 7 target landmarks on the sensor helmet and various fiducials to math the inside/outside scan with the subeject MRI. Preview sensors in "fast mode" first before calculating more stable solution. Finally, "apply to fif" will save the `trans` to files
+
+More information and instruction at [**GUI usage**](https://github.com/wadelab/yorc-gui/blob/master/GUI_USAGE.md)
+
+### (Alternative) 3.A
+Can also run `YORC.py` or `manual_YORC.py` in terminal instead of GUI, you will be prompted to pick points on each of the 4 files used to coreg them all together. After activiating the environment, `cd ..` out to your home or user directory, then run:
 
 ```bash
 python3 /"your_path_here"/manual_YORC.py
@@ -161,10 +178,6 @@ Follow prompts in terminal
 - `Shift + Left Click`: add point
 - `Shift + Right Click`: remove last point
 - `q`: move to next step
-
-Or, you can run in York GUI for more visuals and troubleshooting. In terminal: 
-`uv run yorc-tripanel-gui`
-Then, select the same four files as above and follow the same steps as prompted. More infor and instruction at [**GUI usage**](https://github.com/wadelab/yorc-gui/blob/master/GUI_USAGE.md)
 
 
 ## 4. Run pipeline
