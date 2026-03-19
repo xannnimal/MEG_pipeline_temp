@@ -154,10 +154,11 @@ In the terminal, navigate to the cloned `yorc-gui` folder we created earlier and
 source .venv/bin/activate
 ```
 
-Open York GUI for more visuals and troubleshooting. 
-In terminal, `cd ..` back to "home" or "user", then launch GUI:
-```uv run yorc-tripanel-gui```
-Then, select the same four files (with path names described from "Users/") as above and follow the steps as prompted. These will ask you to pick the 7 target landmarks on the sensor helmet and various fiducials to math the inside/outside scan with the subeject MRI. Preview sensors in "fast mode" first before calculating more stable solution. Finally, "apply to fif" will save the `trans` to files
+Open York GUI for more visuals and troubleshooting. In terminal, `cd ..` back to "User/<name>/", then launch GUI:
+```bash
+uv run yorc-tripanel-gui
+```
+Then, select the same four files (with path names described from "User/<name>/", eg. "documens/folder") as above and follow the steps as prompted. These will ask you to pick the 7 target landmarks on the sensor helmet and various fiducials to math the inside/outside scan with the subeject MRI. Preview sensors in "fast mode" first before calculating more stable solution. Finally, "apply to fif" will save the `trans` to files
 
 More information and instruction at [**GUI usage**](https://github.com/wadelab/yorc-gui/blob/master/GUI_USAGE.md)
 
