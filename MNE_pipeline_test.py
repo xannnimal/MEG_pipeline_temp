@@ -27,6 +27,7 @@ import warnings
 import numpy as np
 import nibabel as nib
 from pathlib import Path
+import matplotlib.pyplot as plt
 
 import mne
 from mne.io import read_raw_ctf
@@ -470,47 +471,138 @@ def _pseudo_inverse_custom(subject, fwd, evoked, snr, fixed_ori):
     )
     return stc
 
+# ---- Helpers from Teresa Cheung --------------------------------------------
+def plot3Dhelmetwithhpi(raw,ax,showLabels=True,showDevice=True,thetitle=''):
+
+    raw.load_data()
+
+    ax.title.set_text(thetitle)
+    trans=raw.info['dev_head_t']['trans']
+    print(trans)
+
+    info=raw.info
+    digpts=np.array([],dtype=float)
+    digpts_head=np.array([],dtype=float)
+
+    offset=0
+    picks = mne.pick_types(info, meg='mag')
+    for j in picks:
+        ch = info['chs'][j]
+        #print(ch['ch_name'])
+        #print(ch['loc'][0:3])
+        ex=ch['loc'][3:6]
+        ey=ch['loc'][6:9]
+        ez=ch['loc'][9:12]
+        R=np.vstack((ex, ey, ez))
+        #take the loc points and offset by 5 mm to account for distance from scalp to sensor
+        move = np.dot((0,0,offset),R)
+        digpts=np.append(digpts,(ch['loc'][0:3]-move)) # to account for the gap between sensor surface and cell centre
+        head_coord = mne.transforms.apply_trans(trans, ch['loc'][0:3]-move)
+        digpts_head=np.append(digpts_head,(head_coord)) # to account for the gap between sensor surface and cell centre
+        #digpts=np.append(digpts,ch['loc'][0:3])
+        #print((ch['loc'][0:3]),(ch['loc'][0:3]-move))
+        #print(move)
+
+    n=int(digpts.shape[0]/3)
+    digpts=digpts.reshape((n,3))
+
+    n=int(digpts_head.shape[0]/3)
+    digpts_head=digpts_head.reshape((n,3))
+
+    print(digpts.shape)
+
+    
+
+    thesize=7
+
+    if showDevice:
+        for i in range(len(digpts)):
+            ax.scatter(digpts[i][0], digpts[i][1], digpts[i][2], '10', c='cyan', alpha=0.75)
+        i=0
+        ax.scatter(digpts[i][0], digpts[i][1], digpts[i][2], '10', c='cyan',s =40, alpha=0.75)
+        
+        ax.text(digpts[i][0], digpts[i][1], digpts[i][2],  raw.info['ch_names'][i], size=thesize, zorder=1,  color='cyan') 
+
+    if 1:
+        for i in range(len(digpts_head)):
+            ax.scatter(digpts_head[i][0], digpts_head[i][1], digpts_head[i][2], '10', c='magenta', alpha=0.75)
+            if showLabels:
+                ax.text(digpts_head[i][0], digpts_head[i][1], digpts_head[i][2],  raw.info['ch_names'][i], size=thesize, zorder=1,  color='magenta') 
+
+        i=0
+    
+        ax.scatter(digpts_head[i][0], digpts_head[i][1], digpts_head[i][2], '10', c='magenta',s=40, alpha=0.75)
+        ax.text(digpts_head[i][0], digpts_head[i][1], digpts_head[i][2],  raw.info['ch_names'][i], size=thesize, zorder=1,  color='magenta') 
+
+    LPA=raw.info['dig'][4]['r']
+    NA=raw.info['dig'][3]['r']
+    RPA=raw.info['dig'][5]['r']
+    IN=raw.info['dig'][6]['r']
+    CZ=raw.info['dig'][7]['r']
+
+    ax.scatter(NA[0],NA[1],NA[2], '10', s=80, c='blue', marker='^', alpha=0.75)
+    ax.text(NA[0],NA[1],NA[2],  'NA', size=thesize, zorder=1,  color='blue') 
+
+    ax.scatter(LPA[0],LPA[1],LPA[2], '10', s=80, c='green', marker='^',alpha=0.75)
+    ax.text(LPA[0],LPA[1],LPA[2],   'LPA', size=thesize, zorder=1,  color='green') 
+
+    ax.scatter(RPA[0],RPA[1],RPA[2], '10', s=80, c='red', marker='^',alpha=0.75)
+    ax.text(RPA[0],RPA[1],RPA[2],   'RPA', size=thesize, zorder=1,  color='red') 
+
+    ax.scatter(IN[0],IN[1],IN[2], '10', s=80, c='black', marker='^',alpha=0.75)
+    ax.scatter(CZ[0],CZ[1],CZ[2], '10', s=80, c='black', marker='^',alpha=0.75)
+
+    ax.set_xlabel('X Label')
+    ax.set_ylabel('Y Label')
+    ax.set_zlabel('Z Label')
+
 
 # -----------------------------------------------------------------------------
 # --- Main (example usage) ----------------------------------------------------
 if __name__ == '__main__':
-    # subjects_dir = Path(os.environ["SUBJECTS_DIR"])
-    # subjects_dir = '/Users/alexandria/Documents/STANFORD/DATA/FieldLine_tests/OPMtest_0205/sub-XM'
-    # raw_files = ['20260206_143328_sub-XM_file-xantone_raw.fif']
-    
     ## AN, checkers visual, 5 Feb 2026
-    sample_dir = '/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_MultimodalImaging/pilots/VWFA/sub-S002/'
-    raw_files = ['20260305_150619_sub-NL0034_file-NL0034_raw.fif']
-                #['20260305_150619_sub-NL0034_file-NL0034_raw.fif']
-                #['20260305_154343_sub-S002_file-S002_raw.fif']
-                 #'20260305_153136_sub-S002_file-S002-lidar2_raw.fif']
-    trans = os.path.join(sample_dir,'20260305_150619_sub-NL0034_file-NL0034_raw_trans.fif')
-
-    # The paths to Freesurfer reconstructions
-    subjects_dir = '/Users/alexandria/Documents/STANFORD/subjects/'
-    subject = 's002'
+    # sample_dir = '/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_MultimodalImaging/pilots/Tones/sub-S002/'
+    # raw_files = ['20260305_153136_sub-S002_file-S002_raw.fif',
+    #              '20260305_153136_sub-S002_file-S002-lidar2_raw.fif']
+    #             #['20260305_150619_sub-NL0034_file-NL0034_raw.fif']
+    #             #['20260305_154343_sub-S002_file-S002_raw.fif']
+    #              #'20260305_153136_sub-S002_file-S002-lidar2_raw.fif']
+    # trans = os.path.join(sample_dir,'20260305_153136_sub-S002_file-S002-lidar2_raw_trans.fif')
+    # dig_file='/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_MultimodalImaging/pilots/VWFA/sub-S002/20260305_150250_hpi_raw.fif'
+    # # The paths to Freesurfer reconstructions
+    # subjects_dir = '/Users/alexandria/Documents/STANFORD/subjects/'
+    # subject = 's002'
     
-    ## Define constants
-    trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
-    ## Define filter type
-    prepros_type = 'high-filter' 
+    ## subjects from tone task
+    sample_dir='/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_AuditoryTone/NoTask/sub-S011/'
+    raw_files = ['20260303_133514_sub-S011_file-S011_scan_raw.fif']
+    trans='/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_AuditoryTone/NoTask/sub-S011/20260303_133514_sub-S011_file-S011_scan_raw_trans.fif'
+    
+    subjects_dir = '/Users/alexandria/Downloads/freesurfer/subjects/'
+    subject = 's011Test'
     
     for file in raw_files:
         # --- 1. and 2. Load data, find events, and preprocess ----------------
         if file.endswith(".fif"):
             ## load OPM, find events, do preprocessing
+            ## specify trigger 
+            trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
+            
+            ## specify processing type
+            ## Define filter type
+            prepros_type = 'high-filter' 
             raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
             [raw_pre, events] = pros_OPM_data(raw, trigger_chan, prepros_type)
             info = raw_pre.info
             picks = 'mag'
             
         elif file.endswith(".ds"):
-            """ TODO: add specific CTF preprocessing after we figure out event ID issues
-            Do CTF-MEG load and preprocess """
             raw = read_raw_ctf(os.path.join(sample_dir,file), preload=True)
+            ## always do this preprocessing, reccommended by Dylan @ UCSF
             raw.apply_gradient_compensation(3)
-            info = raw_pre.info
+            info = raw.info
             picks = 'grad'
+            'TODO: add events!!!'
         else:
             print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
         
@@ -524,9 +616,8 @@ if __name__ == '__main__':
         fig = mne.viz.plot_events(events, sfreq=raw.info["sfreq"], first_samp=raw.first_samp)
 
         
-        # --- 2.B visualize sensors alignment ---------------------------------
-        # Here we look at the dense head, which isn't used for BEM computations but
-        # is useful for coregistration.
+        ## --- 2.B visualize sensor alignment and BEM---------------------------------
+        # Here we look at the dense head, which isn't used for BEM computations but is useful for coregistration.
         mne.viz.plot_alignment(
             info,
             trans=trans,
@@ -536,6 +627,15 @@ if __name__ == '__main__':
             subjects_dir=subjects_dir,
             surfaces="head-dense",
             )
+        # look at BEM
+        plot_bem_kwargs = dict(
+            subject=subject,
+            subjects_dir=subjects_dir,
+            brain_surfaces="white",
+            orientation="coronal",
+            slices=[50, 100, 150, 200])
+    
+        mne.viz.plot_bem(**plot_bem_kwargs)
 
         # --- 3. Make Epochs and Evokeds --------------------------------------
         tmin = -0.2  # start of each epoch (200ms before the trigger)
@@ -549,13 +649,13 @@ if __name__ == '__main__':
         fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file + ' with ' + prepros_type)
         
         # --- 4. Create covariance --------------------------------------------
-        noise_cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank=None)
+        cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank=None)
         # cov = mne.cov.regularize(cov, evoked.info, mag=0.05, grad = 0.05, proj = True, exclude = 'bads')
 
 
         # --- 5. Forward solution ---------------------------------------------
-        # fwd = make_forward(subject, trans, evoked, subjects_dir)
-        src = mne.setup_source_space(subject, spacing="oct6", add_dist="patch", subjects_dir=subjects_dir)
+        # ##fwd = make_forward(subject, trans, evoked, subjects_dir)
+        src = mne.setup_source_space(subject, spacing="oct4", add_dist="patch", subjects_dir=subjects_dir)
         conductivity = (0.3,)  # for single layer
         # conductivity = (0.3, 0.006, 0.3)  # for three layers
         model = mne.make_bem_model(subject=subject, ico=4, conductivity=conductivity, subjects_dir=subjects_dir)
@@ -571,29 +671,77 @@ if __name__ == '__main__':
             n_jobs=None,
             verbose=True,
         )
+        ## This version gave error "Surface inner skull is not completely inside surface outer skull"?
+        # fwd = make_forward(subject, subjects_dir, trans, evoked,
+        #                  overwrite_fwd=True, overwrite=False,
+        #                  fixed=True, bem_ico=4, src_space="oct7",
+        #                  conductivity=(0.3, 0.006, 0.3),
+        #                  mindist=5, surface='mid',
+        #                  visualize=False, verbose=False)
         
         
         # --- 6. Inverse solution ---------------------------------------------
         #stc, inv_op = make_inverse(subjects_dir, subject_id, fwd, evoked, noise_cov)
-        # inv = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, cov, loose = None, depth = None, fixed = False)
+        inv_operator = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, cov, loose = 0.2, depth = 0.8, fixed = False)
         ## apply inverse for each condition 
                 
         
         # --- 7. Apply inverse to evokeds -------------------------------------
-        #stc, inv_op = make_inverse(subjects_dir, subject_id, fwd, evoked, noise_cov)
+        method = "dSPM"  # could choose MNE, sLORETA, or eLORETA instead
+        snr = 3.0
+        lambda2 = 1.0 / snr**2
+        stc, residual = apply_inverse(
+            evoked,
+            inv_operator,
+            lambda2,
+            method=method,
+            pick_ori=None,
+            return_residual=True,
+            verbose=True)
         
+        
+        # --- 8. Visualize inverse --------------------------------------------
+        vertno_max, time_max = stc.get_peak(hemi="rh")
+        surfer_kwargs = dict(
+            hemi="both",
+            subjects_dir=subjects_dir,
+            clim=dict(kind="value", lims=[12,20,28]),
+            views="lateral",
+            initial_time=time_max,
+            time_unit="s",
+            size=(800, 800),
+            smoothing_steps=10)
+        
+        brain = stc.plot(**surfer_kwargs)
+        brain.add_foci(
+            vertno_max,
+            coords_as_verts=True,
+            hemi="rh",
+            color="blue",
+            scale_factor=0.6,
+            alpha=0.5)
+        brain.add_text(0.1, 0.9, "dSPM (plus location of maximal activation)", "title", font_size=14)
+        
+        ## test save
+        brain.save_movie('/Users/alexandria/Documents/STANFORD_files/Fosters_inverse_paper/source_localization_results/pipeline_tests/s011Test_loc_movie.mov', tmin=0.08, tmax=0.15, interpolation='linear',time_dilation=20, framerate=10, time_viewer=True)
+    
+        ###
+        # evoked.crop(0.07, 0.13)
+        # dip = mne.fit_dipole(evoked, cov, bem, trans)[0]
+        # dip.plot_locations(trans, subject, subjects_dir)
+       
         
         # --- 8. Save all files in BIDS structure -----------------------------
         #stc, inv_op = make_inverse(subjects_dir, subject_id, fwd, evoked, noise_cov)
         
         # --- 9. Generate and save MNE Report ---------------------------------
-        report = mne.Report(title="Raw example")
-        report.add_raw(raw=raw, title= file , psd=True)
-        report.add_events(events=events, title='Events from "events"', sfreq=sfreq)
-        report.add_epochs(epochs=epochs, title='Epochs from "epochs"')
-        report.add_evokeds(evokeds=evoked,titles= 'Evoked with ' + prepros_type)
-        report.add_covariance(cov=noise_cov, info=raw.info, title="Covariance")
-        report.save(file + "report_raw.html", overwrite=True)
+        # report = mne.Report(title="Raw example")
+        # report.add_raw(raw=raw, title= file , psd=True)
+        # report.add_events(events=events, title='Events from "events"', sfreq=sfreq)
+        # report.add_epochs(epochs=epochs, title='Epochs from "epochs"')
+        # report.add_evokeds(evokeds=evoked,titles= 'Evoked with ' + prepros_type)
+        # report.add_covariance(cov=noise_cov, info=raw.info, title="Covariance")
+        # report.save(file + "report_raw.html", overwrite=True)
         
 
 
