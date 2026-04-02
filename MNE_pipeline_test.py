@@ -579,7 +579,7 @@ if __name__ == '__main__':
     trans='/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_AuditoryTone/NoTask/sub-S011/20260303_133514_sub-S011_file-S011_scan_raw_trans.fif'
     
     subjects_dir = '/Users/alexandria/Downloads/freesurfer/subjects/'
-    subject = 's011Test'
+    subject = 'S011'
     
     for file in raw_files:
         # --- 1. and 2. Load data, find events, and preprocess ----------------
@@ -655,7 +655,7 @@ if __name__ == '__main__':
 
         # --- 5. Forward solution ---------------------------------------------
         # ##fwd = make_forward(subject, trans, evoked, subjects_dir)
-        src = mne.setup_source_space(subject, spacing="oct4", add_dist="patch", subjects_dir=subjects_dir)
+        src = mne.setup_source_space(subject, spacing="ico4", add_dist="patch", subjects_dir=subjects_dir)
         conductivity = (0.3,)  # for single layer
         # conductivity = (0.3, 0.006, 0.3)  # for three layers
         model = mne.make_bem_model(subject=subject, ico=4, conductivity=conductivity, subjects_dir=subjects_dir)
@@ -682,13 +682,13 @@ if __name__ == '__main__':
         
         # --- 6. Inverse solution ---------------------------------------------
         #stc, inv_op = make_inverse(subjects_dir, subject_id, fwd, evoked, noise_cov)
-        inv_operator = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, cov, loose = 0.2, depth = 0.8, fixed = False)
+        inv_operator = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, cov, loose = 1, depth = None, fixed = False)
         ## apply inverse for each condition 
                 
         
         # --- 7. Apply inverse to evokeds -------------------------------------
         method = "dSPM"  # could choose MNE, sLORETA, or eLORETA instead
-        snr = 3.0
+        snr = 2.0
         lambda2 = 1.0 / snr**2
         stc, residual = apply_inverse(
             evoked,
@@ -723,7 +723,7 @@ if __name__ == '__main__':
         brain.add_text(0.1, 0.9, "dSPM (plus location of maximal activation)", "title", font_size=14)
         
         ## test save
-        brain.save_movie('/Users/alexandria/Documents/STANFORD_files/Fosters_inverse_paper/source_localization_results/pipeline_tests/s011Test_loc_movie.mov', tmin=0.08, tmax=0.15, interpolation='linear',time_dilation=20, framerate=10, time_viewer=True)
+        #brain.save_movie('/Users/alexandria/Documents/STANFORD_files/Fosters_inverse_paper/source_localization_results/pipeline_tests/s011Test_loc_movie.mov', tmin=0.08, tmax=0.15, interpolation='linear',time_dilation=20, framerate=10, time_viewer=True)
     
         ###
         # evoked.crop(0.07, 0.13)
