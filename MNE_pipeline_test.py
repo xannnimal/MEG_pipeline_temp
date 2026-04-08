@@ -383,7 +383,8 @@ def make_inverse(subjects_dir, subject, fwd, evoked, noise_cov,
     if noise_free:
         noise_cov = _get_identity_cov(fwd, evoked)
         snr = 100
-    noise_cov = noise_cov.pick_channels(evoked.ch_names)
+    common_chs = [ch for ch in evoked.ch_names if ch in noise_cov.ch_names]
+    noise_cov = noise_cov.pick_channels(common_chs)
 
     # Regularisation
     if lambda2 is None:
@@ -574,8 +575,21 @@ if __name__ == '__main__':
             else:
                 meg_files.append(filename)
     
+    ## subjects from tone task
+    # sample_dir='/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_AuditoryTone/NoTask/sub-S011/'
+    # raw_files = ['20260303_133514_sub-S011_file-S011_scan_raw.fif']
+    # trans='/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_AuditoryTone/NoTask/sub-S011/20260303_133514_sub-S011_file-S011_scan_raw_trans.fif'
     
-    subjects_dir = os.path.join(sample_dir,subject,'anat')
+    # sample_dir='/Users/yvonnafeng/csharp_data/S001/meg'
+    # raw_files = ['sub-S001_task-V1Loc_meg_scan_raw.fif']
+    # trans='/Users/yvonnafeng/csharp_data/S001/meg/sub-S001_task-V1Loc_meg_scan_raw_trans.fif'
+
+    # # subjects_dir = '/Users/alexandria/Downloads/freesurfer/subjects/'
+    # subjects_dir = '/Users/yvonnafeng/Downloads/freesurfer/subjects/'
+    # subject = 'S001'
+
+    # --- Load user-specific config (copy config_template.py -> config.py and fill in your paths)
+    from config import sample_dir, raw_files, trans, subjects_dir, subject, viz_bool, save_report
     
     ## load and process
     for file, trans in zip(meg_files,trans_files):
@@ -616,11 +630,12 @@ if __name__ == '__main__':
         # mne.write_events( participant + '/' + participant + '_events.fif',events)
         ## define triggers
         # event_id = dict(<cond1> = 1, <cond2> = 2, <cond3> = 16, <cond4> = 32)  
-        sfreq = raw.info["sfreq"]
-        fig = mne.viz.plot_events(events, sfreq=raw.info["sfreq"], first_samp=raw.first_samp)
+        if viz_bool:
+            sfreq = raw.info["sfreq"]
+            fig = mne.viz.plot_events(events, sfreq=raw.info["sfreq"], first_samp=raw.first_samp)
 
         
-        ## --- 2.B visualize sensor alignment and BEM---------------------------------
+        # --- 2.B visualize sensor alignment and BEM---------------------------------
         # Here we look at the dense head, which isn't used for BEM computations but is useful for coregistration.
         mne.viz.plot_alignment(
             info,
@@ -640,20 +655,40 @@ if __name__ == '__main__':
             slices=[50, 100, 150, 200])
     
         mne.viz.plot_bem(**plot_bem_kwargs)
-
+        if viz_bool:
+            mne.viz.plot_alignment(
+                info,
+                trans=trans,
+                subject=subject,
+                dig=True,
+                meg=["helmet", "sensors"],
+                subjects_dir=subjects_dir,
+                surfaces="head-dense",
+                )
+            # look at BEM
+            plot_bem_kwargs = dict(
+                subject=subject,
+                subjects_dir=subjects_dir,
+                brain_surfaces="white",
+                orientation="coronal",
+                slices=[50, 100, 150, 200])
+        
+            mne.viz.plot_bem(**plot_bem_kwargs)
         # --- 3. Make Epochs and Evokeds --------------------------------------
         tmin = -0.2  # start of each epoch (200ms before the trigger)
         tmax = 0.6  # end of each epoch (600ms after the trigger)
         epochs = mne.Epochs(raw_pre, events, picks=[picks], tmin=tmin, tmax=tmax, preload=True)
         evoked = epochs.average()
         
-        ## specify plotting args
-        ts_args = ts_args = dict(time_unit="s") # can specify limits as ylim=dict(mag=(-400, 400)))
-        topomap_args = dict(time_unit="s") # you can pass other args here, like 'vmin', 'vmax', 'cmap', etc.
-        fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file + ' with ' + prepros_type)
+        if viz_bool:
+            ## specify plotting args
+            ts_args = ts_args = dict(time_unit="s") # can specify limits as ylim=dict(mag=(-400, 400)))
+            topomap_args = dict(time_unit="s") # you can pass other args here, like 'vmin', 'vmax', 'cmap', etc.
+            fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file + ' with ' + prepros_type)
         
         # --- 4. Create covariance --------------------------------------------
-        cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank=None)
+        # cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank=None)
+        # cov.save(f'{sample_dir}/V1Loc_empirical_cov.fif')
         # cov = mne.cov.regularize(cov, evoked.info, mag=0.05, grad = 0.05, proj = True, exclude = 'bads')
 
 
@@ -676,76 +711,110 @@ if __name__ == '__main__':
             verbose=True,
         )
         ## This version gave error "Surface inner skull is not completely inside surface outer skull"?
+        # # ##fwd = make_forward(subject, trans, evoked, subjects_dir)
+        # src = mne.setup_source_space(subject, spacing="ico4", add_dist="patch", subjects_dir=subjects_dir)
+        # conductivity = (0.3,)  # for single layer
+        # # conductivity = (0.3, 0.006, 0.3)  # for three layers
+        # model = mne.make_bem_model(subject=subject, ico=4, conductivity=conductivity, subjects_dir=subjects_dir)
+        # bem = mne.make_bem_solution(model)
+        # fwd = mne.make_forward_solution(
+        #     os.path.join(sample_dir,file),
+        #     trans=trans,
+        #     src=src,
+        #     bem=bem,
+        #     meg=True,
+        #     eeg=False,
+        #     mindist=5.0,
+        #     n_jobs=None,
+        #     verbose=True,
+        # )
+        # This version gave error "Surface inner skull is not completely inside surface outer skull"?
+        # update 2026 Apr 7 (QF): make_forward finished without error
         # fwd = make_forward(subject, subjects_dir, trans, evoked,
-        #                  overwrite_fwd=True, overwrite=False,
+        #                  overwrite_fwd=False, overwrite=False,
         #                  fixed=True, bem_ico=4, src_space="oct7",
         #                  conductivity=(0.3, 0.006, 0.3),
         #                  mindist=5, surface='mid',
         #                  visualize=False, verbose=False)
         
-        
         # --- 6. Inverse solution ---------------------------------------------
-        #stc, inv_op = make_inverse(subjects_dir, subject_id, fwd, evoked, noise_cov)
-        inv_operator = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, cov, loose = 1, depth = None, fixed = False)
-        ## apply inverse for each condition 
+        fwd = mne.read_forward_solution(f'{subjects_dir}/{subject}/bem/{subject}-fwd.fif')
+        cov = mne.read_cov(f'{sample_dir}/V1Loc_empirical_cov.fif')
+        stc, inv_op = make_inverse(subjects_dir, subject, fwd, evoked, cov, inverse_method="dSPM")
+        # inv_operator = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, cov, loose = 1, depth = None, fixed = False)
+        # ## apply inverse for each condition 
                 
         
-        # --- 7. Apply inverse to evokeds -------------------------------------
-        method = "dSPM"  # could choose MNE, sLORETA, or eLORETA instead
-        snr = 2.0
-        lambda2 = 1.0 / snr**2
-        stc, residual = apply_inverse(
-            evoked,
-            inv_operator,
-            lambda2,
-            method=method,
-            pick_ori=None,
-            return_residual=True,
-            verbose=True)
+        # # --- 7. Apply inverse to evokeds -------------------------------------
+        # method = "dSPM"  # could choose MNE, sLORETA, or eLORETA instead
+        # snr = 2.0
+        # lambda2 = 1.0 / snr**2
+        # stc, residual = apply_inverse(
+        #     evoked,
+        #     inv_operator,
+        #     lambda2,
+        #     method=method,
+        #     pick_ori=None,
+        #     return_residual=True,
+        #     verbose=True)
         
         
         # --- 8. Visualize inverse --------------------------------------------
-        vertno_max, time_max = stc.get_peak(hemi="rh")
-        surfer_kwargs = dict(
-            hemi="both",
-            subjects_dir=subjects_dir,
-            clim=dict(kind="value", lims=[12,20,28]),
-            views="lateral",
-            initial_time=time_max,
-            time_unit="s",
-            size=(800, 800),
-            smoothing_steps=10)
+        if viz_bool: 
+            vertno_max, time_max = stc.get_peak(hemi="rh")
+            surfer_kwargs = dict(
+                hemi="split",
+                subjects_dir=subjects_dir, # clim=dict(kind="value"), lims=[12,20,28]
+                views=["caudal", "medial"], # for visual task
+                initial_time=time_max,
+                time_unit="s",
+                size=(800, 800),
+                smoothing_steps=5)
+
+            brain = stc.plot(**surfer_kwargs)
+            brain.plotter.scalar_bar.GetLabelTextProperty().SetFontSize(8)
+            # These params are tested to fit if you have two views (one on top and one at the bottom) with splitted hemi. eg. views=["caudal", "medial"]
+            # You should change this if you have single view only
+            sb = brain.plotter.scalar_bar
+            x, _ = sb.GetPosition()
+            sb.SetPosition(x, 0.6)  # vertically between caudal (top) and medial (bottom) rows
+            w, h = sb.GetPosition2()
+            sb.SetPosition2(w, h * 0.5)  # shrink height so top of the color bar doesn't clip
+            for renderer in brain.plotter.renderers:
+                for actor in renderer.GetActors2D():
+                    if hasattr(actor, 'GetTextProperty'):
+                        actor.GetTextProperty().SetFontSize(7)
+            brain.add_foci(
+                vertno_max,
+                coords_as_verts=True,
+                hemi="rh",
+                color="blue",
+                scale_factor=0.6,
+                alpha=0.5)
+            brain.add_text(0.1, 0.9, "V1_Loc: dSPM", "title", font_size=8)
+            
+            # test save
+            # brain.save_movie('/Users/alexandria/Documents/STANFORD_files/Fosters_inverse_paper/source_localization_results/pipeline_tests/s011Test_loc_movie.mov', tmin=0.08, tmax=0.15, interpolation='linear',time_dilation=20, framerate=10, time_viewer=True)
+            # brain.save_movie(f'{sample_dir}/S001_V1Loc_movie.mov', tmin=0.0, tmax=0.6, interpolation='linear',time_dilation=20, framerate=10, time_viewer=True)
         
-        brain = stc.plot(**surfer_kwargs)
-        brain.add_foci(
-            vertno_max,
-            coords_as_verts=True,
-            hemi="rh",
-            color="blue",
-            scale_factor=0.6,
-            alpha=0.5)
-        brain.add_text(0.1, 0.9, "dSPM (plus location of maximal activation)", "title", font_size=14)
-        
-        ## test save
-        #brain.save_movie('/Users/alexandria/Documents/STANFORD_files/Fosters_inverse_paper/source_localization_results/pipeline_tests/s011Test_loc_movie.mov', tmin=0.08, tmax=0.15, interpolation='linear',time_dilation=20, framerate=10, time_viewer=True)
-    
-        ###
+        ##
         # evoked.crop(0.07, 0.13)
         # dip = mne.fit_dipole(evoked, cov, bem, trans)[0]
         # dip.plot_locations(trans, subject, subjects_dir)
        
         
-        # --- 8. Save all files in BIDS structure -----------------------------
-        #stc, inv_op = make_inverse(subjects_dir, subject_id, fwd, evoked, noise_cov)
+        # # --- 8. Save all files in BIDS structure -----------------------------
+        # #stc, inv_op = make_inverse(subjects_dir, subject_id, fwd, evoked, noise_cov)
         
         # --- 9. Generate and save MNE Report ---------------------------------
-        # report = mne.Report(title="Raw example")
-        # report.add_raw(raw=raw, title= file , psd=True)
-        # report.add_events(events=events, title='Events from "events"', sfreq=sfreq)
-        # report.add_epochs(epochs=epochs, title='Epochs from "epochs"')
-        # report.add_evokeds(evokeds=evoked,titles= 'Evoked with ' + prepros_type)
-        # report.add_covariance(cov=noise_cov, info=raw.info, title="Covariance")
-        # report.save(file + "report_raw.html", overwrite=True)
+        if save_report:
+            report = mne.Report(title="Raw example")
+            report.add_raw(raw=raw, title= file , psd=True)
+            report.add_events(events=events, title='Events from "events"', sfreq=sfreq)
+            report.add_epochs(epochs=epochs, title='Epochs from "epochs"')
+            report.add_evokeds(evokeds=evoked,titles= 'Evoked with ' + prepros_type)
+            report.add_covariance(cov=cov, info=raw.info, title="Covariance")
+            report.save(file + "report_raw.html", overwrite=True)
         
 
 

@@ -163,7 +163,7 @@ Then, select the same four files (with path names described from "User/<name>/",
 More information and instruction at [**GUI usage**](https://github.com/wadelab/yorc-gui/blob/master/GUI_USAGE.md)
 
 ### (Alternative) 3.A
-Can also run `YORC.py` or `manual_YORC.py` in terminal instead of GUI, you will be prompted to pick points on each of the 4 files used to coreg them all together. After activiating the environment, `cd ..` out to your home or user directory, then run:
+Transformation matricies can also be found using `manual_YORC.py` in terminal instead of GUI. Do this method if the scan is missing 1 of the 7 landmarks on the helmet! You will be prompted to pick points on each of the 4 files used to coreg them all together. After activiating the environment, `cd ..` out to your home or user directory, then run:
 
 ```bash
 python3 /"your_path_here"/manual_YORC.py
@@ -173,13 +173,17 @@ python3 /"your_path_here"/manual_YORC.py
   -m /"your_path_here"/subID-raw.fif
   -lm 1 2 3 4 5 6 7
 ```
-> **Note:** `-lm 1 2 3 4 5 6 7` specifices the landmarks visibile on the helmet Lidar scan. Can use 6 if the scan missed one, but 7 is ideal
+> **Note:** `-lm 1 2 3 4 5 6 7` specifices the landmarks visibile on the helmet Lidar scan. For example, if the first landmark on the right of the scan isn't visible, run the code with `-lm 2 3 4 5 6 7`
 
 Follow prompts in terminal
 - `Shift + Left Click`: add point
 - `Shift + Right Click`: remove last point
 - `q`: move to next step
+- check overlays of in/out scan with MRI scalp surface and sensor locations in visual popups before applying to `.fif`
 
+More information and installation instructions can be found at [York OPM Registration Code](https://vcs.ynic.york.ac.uk/ynic-public/yorc)
+
+> **Note:** Manual YORC python requires Python3.11 and Scipy<1.17 to run. 
 
 ## 4. Run pipeline
 1. Load data (CTF vs FIF files). For FieldLine OPM data, be sure to load the updated raw data with `trans` object added
