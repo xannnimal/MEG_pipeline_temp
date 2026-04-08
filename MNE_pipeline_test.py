@@ -560,28 +560,25 @@ def plot3Dhelmetwithhpi(raw,ax,showLabels=True,showDevice=True,thetitle=''):
 # -----------------------------------------------------------------------------
 # --- Main (example usage) ----------------------------------------------------
 if __name__ == '__main__':
-    ## AN, checkers visual, 5 Feb 2026
-    # sample_dir = '/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_MultimodalImaging/pilots/Tones/sub-S002/'
-    # raw_files = ['20260305_153136_sub-S002_file-S002_raw.fif',
-    #              '20260305_153136_sub-S002_file-S002-lidar2_raw.fif']
-    #             #['20260305_150619_sub-NL0034_file-NL0034_raw.fif']
-    #             #['20260305_154343_sub-S002_file-S002_raw.fif']
-    #              #'20260305_153136_sub-S002_file-S002-lidar2_raw.fif']
-    # trans = os.path.join(sample_dir,'20260305_153136_sub-S002_file-S002-lidar2_raw_trans.fif')
-    # dig_file='/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_MultimodalImaging/pilots/VWFA/sub-S002/20260305_150250_hpi_raw.fif'
-    # # The paths to Freesurfer reconstructions
-    # subjects_dir = '/Users/alexandria/Documents/STANFORD/subjects/'
-    # subject = 's002'
+    ## set up files and directories
+    sample_dir='/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_MultimodalImaging/BIDS_test'
+    subject = 'S001'
+    modality = 'meg'
+    meg_path= os.path.join(sample_dir,subject,modality)
+    trans_files =[]
+    meg_files=[]
+    for filename in os.listdir(meg_path):
+        if "meg_scan" in filename:
+            if "trans" in filename:
+                trans_files.append(filename)
+            else:
+                meg_files.append(filename)
     
-    ## subjects from tone task
-    sample_dir='/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_AuditoryTone/NoTask/sub-S011/'
-    raw_files = ['20260303_133514_sub-S011_file-S011_scan_raw.fif']
-    trans='/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_AuditoryTone/NoTask/sub-S011/20260303_133514_sub-S011_file-S011_scan_raw_trans.fif'
     
-    subjects_dir = '/Users/alexandria/Downloads/freesurfer/subjects/'
-    subject = 'S011'
+    subjects_dir = os.path.join(sample_dir,subject,'anat')
     
-    for file in raw_files:
+    ## load and process
+    for file, trans in zip(meg_files,trans_files):
         # --- 1. and 2. Load data, find events, and preprocess ----------------
         if file.endswith(".fif"):
             ## load OPM, find events, do preprocessing
@@ -591,13 +588,20 @@ if __name__ == '__main__':
             ## specify processing type
             ## Define filter type
             prepros_type = 'high-filter' 
-            raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
+            raw = mne.io.read_raw_fif(os.path.join(meg_path,file),'default', preload=True)
             [raw_pre, events] = pros_OPM_data(raw, trigger_chan, prepros_type)
             info = raw_pre.info
             picks = 'mag'
             
+            ## do in consistent steps:
+                # remove bad channels
+                # filter notch/bandpass
+                # preprocess
+                # ICA (?) 
+                ## probably make task-dependent
+            
         elif file.endswith(".ds"):
-            raw = read_raw_ctf(os.path.join(sample_dir,file), preload=True)
+            raw = read_raw_ctf(os.path.join(meg_path,file), preload=True)
             ## always do this preprocessing, reccommended by Dylan @ UCSF
             raw.apply_gradient_compensation(3)
             info = raw.info
@@ -620,7 +624,7 @@ if __name__ == '__main__':
         # Here we look at the dense head, which isn't used for BEM computations but is useful for coregistration.
         mne.viz.plot_alignment(
             info,
-            trans=trans,
+            trans=os.path.join(meg_path,trans),
             subject=subject,
             dig=True,
             meg=["helmet", "sensors"],
@@ -661,8 +665,8 @@ if __name__ == '__main__':
         model = mne.make_bem_model(subject=subject, ico=4, conductivity=conductivity, subjects_dir=subjects_dir)
         bem = mne.make_bem_solution(model)
         fwd = mne.make_forward_solution(
-            os.path.join(sample_dir,file),
-            trans=trans,
+            os.path.join(meg_path,file),
+            trans=os.path.join(meg_path,file),
             src=src,
             bem=bem,
             meg=True,
