@@ -322,7 +322,9 @@ def make_inverse(subjects_dir, subject, fwd, evoked, noise_cov,
     if noise_free:
         noise_cov = _get_identity_cov(fwd, evoked)
         snr = 100
-    noise_cov = noise_cov.pick_channels(evoked.ch_names)
+    # noise_cov = noise_cov.pick_channels(evoked.ch_names)
+    common_chs = [ch for ch in evoked.ch_names if ch in noise_cov.ch_names]
+    noise_cov = noise_cov.pick_channels(common_chs)
 
     # Regularisation
     if lambda2 is None:
