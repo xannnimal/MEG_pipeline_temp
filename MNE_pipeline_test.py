@@ -654,9 +654,9 @@ if __name__ == '__main__':
         fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file + ' with ' + prepros_type)
         
         # --- 4. Create covariance --------------------------------------------
-        cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank=None)
+        # cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank=None)
         # cov.save(f'{sample_dir}/V1Loc_empirical_cov.fif')
-        cov = mne.cov.regularize(cov, evoked.info, mag=0.05, grad = 0.05, proj = True, exclude = 'bads')
+        # cov = mne.cov.regularize(cov, evoked.info, mag=0.05, grad = 0.05, proj = True, exclude = 'bads')
 
 
         # --- 5. Forward solution ---------------------------------------------
@@ -679,16 +679,16 @@ if __name__ == '__main__':
         # )
         # This version gave error "Surface inner skull is not completely inside surface outer skull"?
         # update 2026 Apr 7 (QF): make_forward finished without error
-        fwd = make_forward(subject, subjects_dir, trans, evoked,
-                         overwrite_fwd=False, overwrite=False,
-                         fixed=True, bem_ico=4, src_space="oct7",
-                         conductivity=(0.3, 0.006, 0.3),
-                         mindist=5, surface='mid',
-                         visualize=False, verbose=False)
+        # fwd = make_forward(subject, subjects_dir, trans, evoked,
+        #                  overwrite_fwd=False, overwrite=False,
+        #                  fixed=True, bem_ico=4, src_space="oct7",
+        #                  conductivity=(0.3, 0.006, 0.3),
+        #                  mindist=5, surface='mid',
+        #                  visualize=False, verbose=False)
         
         # --- 6. Inverse solution ---------------------------------------------
-        # fwd = mne.read_forward_solution(f'{subjects_dir}/{subject}/bem/{subject}-fwd.fif')
-        # cov = mne.read_cov(f'{sample_dir}/V1Loc_empirical_cov.fif')
+        fwd = mne.read_forward_solution(f'{subjects_dir}/{subject}/bem/{subject}-fwd.fif')
+        cov = mne.read_cov(f'{sample_dir}/V1Loc_empirical_cov.fif')
         stc, inv_op = make_inverse(subjects_dir, subject, fwd, evoked, cov, inverse_method="dSPM")
         # inv_operator = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, cov, loose = 1, depth = None, fixed = False)
         # ## apply inverse for each condition 
@@ -711,16 +711,27 @@ if __name__ == '__main__':
         # --- 8. Visualize inverse --------------------------------------------
         vertno_max, time_max = stc.get_peak(hemi="rh")
         surfer_kwargs = dict(
-            hemi="both",
-            subjects_dir=subjects_dir,
-            clim=dict(kind="value", lims=[12,20,28]),
-            views=["lateral", "medial"],
+            hemi="split",
+            subjects_dir=subjects_dir, # clim=dict(kind="value"), lims=[12,20,28]
+            views=["caudal", "medial"], # for visual task
             initial_time=time_max,
             time_unit="s",
             size=(800, 800),
-            smoothing_steps=10)
-        
+            smoothing_steps=5)
+
         brain = stc.plot(**surfer_kwargs)
+        brain.plotter.scalar_bar.GetLabelTextProperty().SetFontSize(8)
+        # These params are tested to fit if you have two views (one on top and one at the bottom) with splitted hemi. eg. views=["caudal", "medial"]
+        # You should change this if you have single view only
+        sb = brain.plotter.scalar_bar
+        x, _ = sb.GetPosition()
+        sb.SetPosition(x, 0.6)  # vertically between caudal (top) and medial (bottom) rows
+        w, h = sb.GetPosition2()
+        sb.SetPosition2(w, h * 0.5)  # shrink height so top of the color bar doesn't clip
+        for renderer in brain.plotter.renderers:
+            for actor in renderer.GetActors2D():
+                if hasattr(actor, 'GetTextProperty'):
+                    actor.GetTextProperty().SetFontSize(7)
         brain.add_foci(
             vertno_max,
             coords_as_verts=True,
@@ -728,11 +739,11 @@ if __name__ == '__main__':
             color="blue",
             scale_factor=0.6,
             alpha=0.5)
-        brain.add_text(0.1, 0.9, "dSPM (plus location of maximal activation)", "title", font_size=14)
+        brain.add_text(0.1, 0.9, "V1_Loc: dSPM", "title", font_size=8)
         
         # test save
         # brain.save_movie('/Users/alexandria/Documents/STANFORD_files/Fosters_inverse_paper/source_localization_results/pipeline_tests/s011Test_loc_movie.mov', tmin=0.08, tmax=0.15, interpolation='linear',time_dilation=20, framerate=10, time_viewer=True)
-        brain.save_movie(f'{sample_dir}/S001_V1Loc_movie.mov', tmin=0.08, tmax=0.15, interpolation='linear',time_dilation=20, framerate=10, time_viewer=True)
+        brain.save_movie(f'{sample_dir}/S001_V1Loc_movie.mov', tmin=0.0, tmax=0.6, interpolation='linear',time_dilation=20, framerate=10, time_viewer=True)
     
         ##
         # evoked.crop(0.07, 0.13)
@@ -744,13 +755,13 @@ if __name__ == '__main__':
         # #stc, inv_op = make_inverse(subjects_dir, subject_id, fwd, evoked, noise_cov)
         
         # --- 9. Generate and save MNE Report ---------------------------------
-        report = mne.Report(title="Raw example")
-        report.add_raw(raw=raw, title= file , psd=True)
-        report.add_events(events=events, title='Events from "events"', sfreq=sfreq)
-        report.add_epochs(epochs=epochs, title='Epochs from "epochs"')
-        report.add_evokeds(evokeds=evoked,titles= 'Evoked with ' + prepros_type)
-        report.add_covariance(cov=cov, info=raw.info, title="Covariance")
-        report.save(file + "report_raw.html", overwrite=True)
+        # report = mne.Report(title="Raw example")
+        # report.add_raw(raw=raw, title= file , psd=True)
+        # report.add_events(events=events, title='Events from "events"', sfreq=sfreq)
+        # report.add_epochs(epochs=epochs, title='Epochs from "epochs"')
+        # report.add_evokeds(evokeds=evoked,titles= 'Evoked with ' + prepros_type)
+        # report.add_covariance(cov=cov, info=raw.info, title="Covariance")
+        # report.save(file + "report_raw.html", overwrite=True)
         
 
 
