@@ -561,38 +561,11 @@ def plot3Dhelmetwithhpi(raw,ax,showLabels=True,showDevice=True,thetitle=''):
 # -----------------------------------------------------------------------------
 # --- Main (example usage) ----------------------------------------------------
 if __name__ == '__main__':
-    ## set up files and directories
-    sample_dir='/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_MultimodalImaging/BIDS_test'
-    subject = 'S001'
-    modality = 'meg'
-    meg_path= os.path.join(sample_dir,subject,modality)
-    trans_files =[]
-    meg_files=[]
-    for filename in os.listdir(meg_path):
-        if "meg_scan" in filename:
-            if "trans" in filename:
-                trans_files.append(filename)
-            else:
-                meg_files.append(filename)
-    
-    ## subjects from tone task
-    # sample_dir='/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_AuditoryTone/NoTask/sub-S011/'
-    # raw_files = ['20260303_133514_sub-S011_file-S011_scan_raw.fif']
-    # trans='/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_AuditoryTone/NoTask/sub-S011/20260303_133514_sub-S011_file-S011_scan_raw_trans.fif'
-    
-    # sample_dir='/Users/yvonnafeng/csharp_data/S001/meg'
-    # raw_files = ['sub-S001_task-V1Loc_meg_scan_raw.fif']
-    # trans='/Users/yvonnafeng/csharp_data/S001/meg/sub-S001_task-V1Loc_meg_scan_raw_trans.fif'
-
-    # # subjects_dir = '/Users/alexandria/Downloads/freesurfer/subjects/'
-    # subjects_dir = '/Users/yvonnafeng/Downloads/freesurfer/subjects/'
-    # subject = 'S001'
-
-    # --- Load user-specific config (copy config_template.py -> config.py and fill in your paths)
-    from config import sample_dir, raw_files, trans, subjects_dir, subject, viz_bool, save_report
+   # --- Load user-specific config (copy config_template.py -> config.py and fill in your paths)
+    from config_XM import sample_dir, raw_files, trans, subjects_dir, subject, viz_bool, save_report
     
     ## load and process
-    for file, trans in zip(meg_files,trans_files):
+    for file in raw_files:
         # --- 1. and 2. Load data, find events, and preprocess ----------------
         if file.endswith(".fif"):
             ## load OPM, find events, do preprocessing
@@ -602,7 +575,7 @@ if __name__ == '__main__':
             ## specify processing type
             ## Define filter type
             prepros_type = 'high-filter' 
-            raw = mne.io.read_raw_fif(os.path.join(meg_path,file),'default', preload=True)
+            raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
             [raw_pre, events] = pros_OPM_data(raw, trigger_chan, prepros_type)
             info = raw_pre.info
             picks = 'mag'
@@ -615,17 +588,16 @@ if __name__ == '__main__':
                 ## probably make task-dependent
             
         elif file.endswith(".ds"):
-            raw = read_raw_ctf(os.path.join(meg_path,file), preload=True)
+            raw = read_raw_ctf(os.path.join(sample_dir,file), preload=True)
             ## always do this preprocessing, reccommended by Dylan @ UCSF
             raw.apply_gradient_compensation(3)
             info = raw.info
             picks = 'grad'
-            'TODO: add events!!!'
+            'TODO: add xDiva events!!!'
         else:
             print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
         
-        # --- 2.A set up Events -----------------------------------------------
-        ## ICA for eyeblinks in precprossessing 
+        # --- 2.Look at Events -----------------------------------------------
         ## save events
         # mne.write_events( participant + '/' + participant + '_events.fif',events)
         ## define triggers
@@ -636,25 +608,6 @@ if __name__ == '__main__':
 
         
         # --- 2.B visualize sensor alignment and BEM---------------------------------
-        # Here we look at the dense head, which isn't used for BEM computations but is useful for coregistration.
-        mne.viz.plot_alignment(
-            info,
-            trans=os.path.join(meg_path,trans),
-            subject=subject,
-            dig=True,
-            meg=["helmet", "sensors"],
-            subjects_dir=subjects_dir,
-            surfaces="head-dense",
-            )
-        # look at BEM
-        plot_bem_kwargs = dict(
-            subject=subject,
-            subjects_dir=subjects_dir,
-            brain_surfaces="white",
-            orientation="coronal",
-            slices=[50, 100, 150, 200])
-    
-        mne.viz.plot_bem(**plot_bem_kwargs)
         if viz_bool:
             mne.viz.plot_alignment(
                 info,
@@ -672,8 +625,8 @@ if __name__ == '__main__':
                 brain_surfaces="white",
                 orientation="coronal",
                 slices=[50, 100, 150, 200])
-        
             mne.viz.plot_bem(**plot_bem_kwargs)
+            
         # --- 3. Make Epochs and Evokeds --------------------------------------
         tmin = -0.2  # start of each epoch (200ms before the trigger)
         tmax = 0.6  # end of each epoch (600ms after the trigger)
@@ -687,7 +640,7 @@ if __name__ == '__main__':
             fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file + ' with ' + prepros_type)
         
         # --- 4. Create covariance --------------------------------------------
-        # cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank=None)
+        cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank=None)
         # cov.save(f'{sample_dir}/V1Loc_empirical_cov.fif')
         # cov = mne.cov.regularize(cov, evoked.info, mag=0.05, grad = 0.05, proj = True, exclude = 'bads')
 
@@ -695,13 +648,13 @@ if __name__ == '__main__':
         # --- 5. Forward solution ---------------------------------------------
         # ##fwd = make_forward(subject, trans, evoked, subjects_dir)
         src = mne.setup_source_space(subject, spacing="ico4", add_dist="patch", subjects_dir=subjects_dir)
-        conductivity = (0.3,)  # for single layer
-        # conductivity = (0.3, 0.006, 0.3)  # for three layers
+        # conductivity = (0.3,)  # for single layer
+        conductivity = (0.3, 0.006, 0.3)  # for three layers
         model = mne.make_bem_model(subject=subject, ico=4, conductivity=conductivity, subjects_dir=subjects_dir)
         bem = mne.make_bem_solution(model)
         fwd = mne.make_forward_solution(
-            os.path.join(meg_path,file),
-            trans=os.path.join(meg_path,file),
+            os.path.join(sample_dir,file),
+            trans=trans,
             src=src,
             bem=bem,
             meg=True,
@@ -710,8 +663,6 @@ if __name__ == '__main__':
             n_jobs=None,
             verbose=True,
         )
-        ## This version gave error "Surface inner skull is not completely inside surface outer skull"?
-        # # ##fwd = make_forward(subject, trans, evoked, subjects_dir)
         # src = mne.setup_source_space(subject, spacing="ico4", add_dist="patch", subjects_dir=subjects_dir)
         # conductivity = (0.3,)  # for single layer
         # # conductivity = (0.3, 0.006, 0.3)  # for three layers
@@ -738,25 +689,25 @@ if __name__ == '__main__':
         #                  visualize=False, verbose=False)
         
         # --- 6. Inverse solution ---------------------------------------------
-        fwd = mne.read_forward_solution(f'{subjects_dir}/{subject}/bem/{subject}-fwd.fif')
-        cov = mne.read_cov(f'{sample_dir}/V1Loc_empirical_cov.fif')
-        stc, inv_op = make_inverse(subjects_dir, subject, fwd, evoked, cov, inverse_method="dSPM")
-        # inv_operator = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, cov, loose = 1, depth = None, fixed = False)
+        # fwd = mne.read_forward_solution(f'{subjects_dir}/{subject}/bem/{subject}-fwd.fif')
+        # cov = mne.read_cov(f'{sample_dir}/V1Loc_empirical_cov.fif')
+        # stc, inv_op = make_inverse(subjects_dir, subject, fwd, evoked, cov, inverse_method="dSPM")
+        inv_operator = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, cov, loose = 1, depth = None, fixed = False)
         # ## apply inverse for each condition 
                 
         
         # # --- 7. Apply inverse to evokeds -------------------------------------
-        # method = "dSPM"  # could choose MNE, sLORETA, or eLORETA instead
-        # snr = 2.0
-        # lambda2 = 1.0 / snr**2
-        # stc, residual = apply_inverse(
-        #     evoked,
-        #     inv_operator,
-        #     lambda2,
-        #     method=method,
-        #     pick_ori=None,
-        #     return_residual=True,
-        #     verbose=True)
+        method = "dSPM"  # could choose MNE, sLORETA, or eLORETA instead
+        snr = 2.0
+        lambda2 = 1.0 / snr**2
+        stc, residual = apply_inverse(
+            evoked,
+            inv_operator,
+            lambda2,
+            method=method,
+            pick_ori=None,
+            return_residual=True,
+            verbose=True)
         
         
         # --- 8. Visualize inverse --------------------------------------------
@@ -793,11 +744,6 @@ if __name__ == '__main__':
                 alpha=0.5)
             brain.add_text(0.1, 0.9, "V1_Loc: dSPM", "title", font_size=8)
             
-            # test save
-            # brain.save_movie('/Users/alexandria/Documents/STANFORD_files/Fosters_inverse_paper/source_localization_results/pipeline_tests/s011Test_loc_movie.mov', tmin=0.08, tmax=0.15, interpolation='linear',time_dilation=20, framerate=10, time_viewer=True)
-            # brain.save_movie(f'{sample_dir}/S001_V1Loc_movie.mov', tmin=0.0, tmax=0.6, interpolation='linear',time_dilation=20, framerate=10, time_viewer=True)
-        
-        ##
         # evoked.crop(0.07, 0.13)
         # dip = mne.fit_dipole(evoked, cov, bem, trans)[0]
         # dip.plot_locations(trans, subject, subjects_dir)
