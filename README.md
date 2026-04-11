@@ -187,11 +187,11 @@ More information and installation instructions can be found at [York OPM Registr
 
 ## 4. Run pipeline
 1. Load data (CTF vs FIF files). For FieldLine OPM data, be sure to load the updated raw data with `trans` object added
-2. Preprocessing - Reject eyeblinks with ICA, high-pass filter, add functions for SSS, homogenous field correction, etc
+2. Preprocessing - Reject eyeblinks with ICA, filter, SSS
 3. Make evokeds for each condition
 4. Create covariance
 5. Forward solution
-6. Inverse solutions - explore options. Most take norm and throw away the orientation. Look into “free” orientation vs locked
+6. Inverse solutions - explore options. Most take norm and throw away the orientation
 7. Apply inverse to evokeds
 8. Put into BIDS structure, specifically with events and evoked.fif files
 9. Generate MNE-report
