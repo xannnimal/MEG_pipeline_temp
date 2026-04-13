@@ -670,7 +670,7 @@ if __name__ == '__main__':
             for i in range(0,len(conds)):
                 ts_args = ts_args = dict(time_unit="s") # can specify limits as ylim=dict(mag=(-400, 400)))
                 topomap_args = dict(time_unit="s") # you can pass other args here, like 'vmin', 'vmax', 'cmap', etc.
-                fig = evokeds[i].plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args,title=file + 'Task: '+ task + ', Condition: ' +conds[i] )
+                fig = evokeds[i].plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args,title=file + ' Task: '+ task + ', Condition: ' +conds[i] )
           
         # average over all conditions within the Task
         epochs_task = mne.Epochs(raw_pre, events, picks=[picks], tmin=tmin, tmax=tmax, preload=True)
@@ -679,7 +679,7 @@ if __name__ == '__main__':
             ## specify plotting args
             ts_args = ts_args = dict(time_unit="s") 
             topomap_args = dict(time_unit="s") 
-            fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file)
+            fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file+ ' Task: '+ task)
         
         # --- 4. Create covariance --------------------------------------------
         cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank=None)
