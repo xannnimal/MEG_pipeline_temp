@@ -41,35 +41,24 @@ warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
 # --- FUNCTIONS ---------------------------------------------------------------
 # --- Load, find events, preprocess -------------------------------------------
-def _highpass_filter_opm(raw):
-    """ 'high-filter' = applies high-pass filter 3Hz ('Agressive'), low pass 40Hz, 60Hz notch """
-    freq_min = 1
-    freq_max = 40
+def filter_raw(raw):
+    freq_min = 0.5
+    freq_max = 80
     raw.load_data().filter(l_freq=freq_min, h_freq=freq_max)
     meg_picks = mne.pick_types(raw.info, meg=True)
     raw.notch_filter(freqs=60, picks=meg_picks)
     return raw
     
-def _ssp_filter(raw):
-    """ 'ssp-filter' = applies high-pass filter 2Hz, low pass 40Hz, 60Hz notch, and SSP method """
-    freq_min = 2
-    freq_max = 40
-    raw.load_data().filter(l_freq=freq_min, h_freq=freq_max)
-    meg_picks = mne.pick_types(raw.info, meg=True)
-    raw.notch_filter(freqs=60, picks=meg_picks)
+def ssp_filter(raw):
     # SSP projector
     proj = mne.compute_proj_raw(raw, start=0, stop=None, duration=1, n_grad=0, n_mag=1, n_eeg=0, reject=None, flat=None, n_jobs=None, meg='separate', verbose=None)
     raw_proj = raw.copy().add_proj(proj)
     return raw_proj
 
-def _sss_prepros(raw):
-    """ 'sss-filter' = applies high-pass filter 1Hz, low pass 40Hz, 60Hz notch, and SSS method """
-    meg_picks = mne.pick_types(raw.info, meg=True)
-    raw.notch_filter(freqs=60, picks=meg_picks)
-    raw_sss = mne.preprocessing.maxwell_filter(raw, origin=(0., 0., 0.), int_order=8, ext_order=3, calibration=None, coord_frame='meg', regularize='in', ignore_ref=True, bad_condition='error', mag_scale=100.0, extended_proj=(), verbose=None)  
-    freq_min = 2
-    freq_max = 40       
-    raw_sss.load_data().filter(l_freq=freq_min, h_freq=freq_max)
+def sss_prepros(raw):
+    """do traditional SSS with origin 0 in MEG frame"""
+    assert raw.info["bads"] == [] # double check bads were dropped
+    raw_sss = mne.preprocessing.maxwell_filter(raw, origin=(0., 0., 0.), int_order=6, ext_order=3, calibration=None, coord_frame='meg', regularize='in', ignore_ref=True, bad_condition='error', mag_scale=100.0, extended_proj=(), verbose=None)  
     return raw_sss
 
 def _eog_artifact(raw):
@@ -79,40 +68,6 @@ def _eog_artifact(raw):
     raw.add_events(eog_events, "STI 014")
     return raw 
 
-def pros_OPM_data(raw, trigger_chan, prepros_type):
-    """Load OPM raw data, find events on trigger chan, do specified preprocessing 
-
-    Parameters
-    ----------
-    raw: mne.Raw
-    trigger chan: str
-        name of the trigger channel
-    prepros_type: str
-        pick from the following options 
-        'no-filter' = no filters applied
-        'high-filter' = applies high-pass filter 3Hz, low pass 40Hz, 60Hz notch filter.
-        'ssp-filter' = applies high-pass filter 2Hz, low pass 40Hz, 60Hz notch, and SSP proj from baseline
-        'sss-filter' = applies high-pass filter 1Hz, low pass 40Hz, 60Hz notch, and SSS method
-        TODO: add Fosters Inverse with SSS
-        
-    Returns
-    -------
-    rawp : mne.Raw with applied filters/projectors
-    events: arrary (event time x 3) containing event IDs and onsets
-    """
-    events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
-    ## preprocess
-    if prepros_type == 'high-filter':
-        rawp = _highpass_filter_opm(raw)
-    elif prepros_type == 'ssp-filter':
-        rawp = _ssp_filter(raw)
-    elif prepros_type == 'sss-filter':
-        rawp = _sss_prepros(raw)
-    elif prepros_type == 'no-filter':
-        rawp = raw
-    else:
-        print("please pick preprocessing type from the defined options")
-    return rawp,events
 
 # --- Helpers -----------------------------------------------------------------
 
@@ -564,31 +519,23 @@ if __name__ == '__main__':
    # --- Load user-specific config (copy config_template.py -> config.py and fill in your paths)
     from config_XM import sample_dir, raw_files, trans, subjects_dir, subject, viz_bool, save_report
     
-    ## load and process
+    ## 1. Load and setup data
     for file in raw_files:
-        # --- 1. and 2. Load data, find events, and preprocess ----------------
+        # --- 1. Load data, find events ---------------------------------------
         if file.endswith(".fif"):
             ## load OPM, find events, do preprocessing
             ## specify trigger 
             trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
             
-            ## specify processing type
-            ## Define filter type
-            prepros_type = 'high-filter' 
+            #setup raw, info, and events
             raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
-            [raw_pre, events] = pros_OPM_data(raw, trigger_chan, prepros_type)
-            info = raw_pre.info
+            events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
+            info = raw.info
             picks = 'mag'
-            
-            ## do in consistent steps:
-                # remove bad channels
-                # filter notch/bandpass
-                # preprocess
-                # ICA (?) 
-                ## probably make task-dependent
             
         elif file.endswith(".ds"):
             raw = read_raw_ctf(os.path.join(sample_dir,file), preload=True)
+            events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
             ## always do this preprocessing, reccommended by Dylan @ UCSF
             raw.apply_gradient_compensation(3)
             info = raw.info
@@ -597,7 +544,7 @@ if __name__ == '__main__':
         else:
             print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
         
-        # --- 2.Look at Events -----------------------------------------------
+        # --- 1.B Look at Events -----------------------------------------------
         ## save events
         # mne.write_events( participant + '/' + participant + '_events.fif',events)
         ## define triggers
@@ -605,6 +552,24 @@ if __name__ == '__main__':
         if viz_bool:
             sfreq = raw.info["sfreq"]
             fig = mne.viz.plot_events(events, sfreq=raw.info["sfreq"], first_samp=raw.first_samp)
+
+        # --- 2. A Preprocess -------------------------------------------------
+        ## start with methods common to both CTF and OPM-MEG
+        # remove bad channels
+        bads = raw.info["bads"]
+        raw.drop_channels(bads)
+        
+        # Notch filter 60Hz, low pass 100Hz, High pass 0.5 Hz
+        raw = filter_raw(raw)
+        
+        # Do SSS
+        raw_sss = sss_prepros(raw)
+        
+        # do SSP
+        raw_pre = ssp_filter(raw_sss)
+        
+        ## specific to task, device ??
+        # reject eye blinks
 
         
         # --- 2.B visualize sensor alignment and BEM---------------------------------
@@ -637,7 +602,7 @@ if __name__ == '__main__':
             ## specify plotting args
             ts_args = ts_args = dict(time_unit="s") # can specify limits as ylim=dict(mag=(-400, 400)))
             topomap_args = dict(time_unit="s") # you can pass other args here, like 'vmin', 'vmax', 'cmap', etc.
-            fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file + ' with ' + prepros_type)
+            fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file)
         
         # --- 4. Create covariance --------------------------------------------
         cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank=None)
@@ -758,7 +723,7 @@ if __name__ == '__main__':
             report.add_raw(raw=raw, title= file , psd=True)
             report.add_events(events=events, title='Events from "events"', sfreq=sfreq)
             report.add_epochs(epochs=epochs, title='Epochs from "epochs"')
-            report.add_evokeds(evokeds=evoked,titles= 'Evoked with ' + prepros_type)
+            report.add_evokeds(evokeds=evoked,titles= 'Evoked')
             report.add_covariance(cov=cov, info=raw.info, title="Covariance")
             report.save(file + "report_raw.html", overwrite=True)
         
