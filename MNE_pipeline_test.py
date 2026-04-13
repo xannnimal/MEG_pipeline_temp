@@ -41,6 +41,75 @@ warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
 # --- FUNCTIONS ---------------------------------------------------------------
 # --- Load, find events, preprocess -------------------------------------------
+def get_events_fif(raw,file):
+    events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
+    if "VWFA" in file:
+        task = "VWFA"
+        event_id = { #VWFA
+            "Cnd1": 1,
+            "Cnd2": 2,
+            "Cnd3": 3,
+            "Cnd4": 4,
+            "Cnd5": 5,
+            "Cnd6": 6,
+            "Cnd7": 7,
+            "Cnd8": 8,
+            "Cnd9": 9,
+            "EndEpoch": 200
+        }
+    if "Tones" in file:
+        task = "Tones"
+        event_id = { #tones
+            "Cnd11": 11,
+            "Cnd12": 12,
+            "Cnd13": 13,
+            "Cnd14": 14,
+            "Cnd15": 15,
+            "EndEpoch": 200
+        }
+    if "V1Loc" in file:
+        Task = "V1Loc"
+        event_id = { #V1Loc
+            "Cnd16": 16,
+            "EndEpoch": 200 
+        }
+    else:
+        print("no valid events detected, please double check data file name")
+    return events, event_id, task
+
+def get_events_ctf(raw,file):
+    events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
+    if "VWFA" in file:
+        event_id = { #VWFA
+            "Cnd1": 65536,
+            "Cnd2": 131072,
+            "Cnd3": 196608,
+            "Cnd4": 262144,
+            "Cnd5": 327680,
+            "Cnd6": 393216,
+            "Cnd7": 458752,
+            "Cnd8": 524288,
+            "Cnd9": 589824,
+            "EndEpoch": 13107200 
+        }
+    if "Tones" in file:
+        event_id = { #tones
+            "Cnd11": 720896,
+            "Cnd12": 786432,
+            "Cnd13": 851968,
+            "Cnd14": 917504,
+            "Cnd15": 983040,
+            "EndEpoch": 13107200 
+        }
+    if "V1Loc" in file:
+        event_id = { #V1Loc
+            "Cnd16": 1048576,
+            "EndEpoch": 13107200 
+        }
+    else:
+        print("no valid events detected, please double check data file name")
+    return events, event_id
+
 def filter_raw(raw):
     freq_min = 0.5
     freq_max = 80
@@ -529,13 +598,13 @@ if __name__ == '__main__':
             
             #setup raw, info, and events
             raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
-            events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
+            [events,event_ids,task] = get_events_fif(raw,file)
             info = raw.info
             picks = 'mag'
             
         elif file.endswith(".ds"):
             raw = read_raw_ctf(os.path.join(sample_dir,file), preload=True)
-            events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
+            [events,event_ids,task] = get_events_ctf(raw,file)
             ## always do this preprocessing, reccommended by Dylan @ UCSF
             raw.apply_gradient_compensation(3)
             info = raw.info
@@ -547,11 +616,9 @@ if __name__ == '__main__':
         # --- 1.B Look at Events -----------------------------------------------
         ## save events
         # mne.write_events( participant + '/' + participant + '_events.fif',events)
-        ## define triggers
-        # event_id = dict(<cond1> = 1, <cond2> = 2, <cond3> = 16, <cond4> = 32)  
         if viz_bool:
             sfreq = raw.info["sfreq"]
-            fig = mne.viz.plot_events(events, sfreq=raw.info["sfreq"], first_samp=raw.first_samp)
+            fig = mne.viz.plot_events(events, sfreq=raw.info["sfreq"], first_samp=raw.first_samp, event_id=event_ids)
 
         # --- 2. A Preprocess -------------------------------------------------
         ## start with methods common to both CTF and OPM-MEG
@@ -593,15 +660,25 @@ if __name__ == '__main__':
             mne.viz.plot_bem(**plot_bem_kwargs)
             
         # --- 3. Make Epochs and Evokeds --------------------------------------
-        tmin = -0.2  # start of each epoch (200ms before the trigger)
-        tmax = 0.6  # end of each epoch (600ms after the trigger)
-        epochs = mne.Epochs(raw_pre, events, picks=[picks], tmin=tmin, tmax=tmax, preload=True)
-        evoked = epochs.average()
-        
+        tmin = -0.05  # start of each epoch (200ms before the trigger)
+        tmax = 0.35  # end of each epoch (600ms after the trigger)
+        # separate out by event ID
+        epochs = mne.Epochs(raw_pre, events, event_ids, tmin, tmax, picks=picks, baseline=(None, 0))
+        evokeds = [epochs[name].average() for name in event_ids]
+        conds = list(event_ids.keys())
+        if viz_bool:
+            for i in range(0,len(conds)):
+                ts_args = ts_args = dict(time_unit="s") # can specify limits as ylim=dict(mag=(-400, 400)))
+                topomap_args = dict(time_unit="s") # you can pass other args here, like 'vmin', 'vmax', 'cmap', etc.
+                fig = evokeds[i].plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args,title=file + 'Task: '+ task + ', Condition: ' +conds[i] )
+          
+        # average over all conditions within the Task
+        epochs_task = mne.Epochs(raw_pre, events, picks=[picks], tmin=tmin, tmax=tmax, preload=True)
+        evoked = epochs_task.average()
         if viz_bool:
             ## specify plotting args
-            ts_args = ts_args = dict(time_unit="s") # can specify limits as ylim=dict(mag=(-400, 400)))
-            topomap_args = dict(time_unit="s") # you can pass other args here, like 'vmin', 'vmax', 'cmap', etc.
+            ts_args = ts_args = dict(time_unit="s") 
+            topomap_args = dict(time_unit="s") 
             fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file)
         
         # --- 4. Create covariance --------------------------------------------
@@ -707,7 +784,7 @@ if __name__ == '__main__':
                 color="blue",
                 scale_factor=0.6,
                 alpha=0.5)
-            brain.add_text(0.1, 0.9, "V1_Loc: dSPM", "title", font_size=8)
+            brain.add_text(0.1, 0.9, "dSPM, Task: " + task, "title", font_size=8)
             
         # evoked.crop(0.07, 0.13)
         # dip = mne.fit_dipole(evoked, cov, bem, trans)[0]
