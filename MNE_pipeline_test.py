@@ -68,7 +68,7 @@ def get_events_fif(raw,file):
             "EndEpoch": 200
         }
     if "V1Loc" in file:
-        Task = "V1Loc"
+        task = "V1Loc"
         event_id = { #V1Loc
             "Cnd16": 16,
             "EndEpoch": 200 
@@ -80,6 +80,7 @@ def get_events_fif(raw,file):
 def get_events_ctf(raw,file):
     events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
     if "VWFA" in file:
+        task= "VWFA"
         event_id = { #VWFA
             "Cnd1": 65536,
             "Cnd2": 131072,
@@ -93,6 +94,7 @@ def get_events_ctf(raw,file):
             "EndEpoch": 13107200 
         }
     if "Tones" in file:
+        task = "Tones"
         event_id = { #tones
             "Cnd11": 720896,
             "Cnd12": 786432,
@@ -102,13 +104,14 @@ def get_events_ctf(raw,file):
             "EndEpoch": 13107200 
         }
     if "V1Loc" in file:
+        task = "V1Loc"
         event_id = { #V1Loc
             "Cnd16": 1048576,
             "EndEpoch": 13107200 
         }
     else:
         print("no valid events detected, please double check data file name")
-    return events, event_id
+    return events, event_id, task
 
 def filter_raw(raw):
     freq_min = 0.5
@@ -596,7 +599,7 @@ if __name__ == '__main__':
             ## specify trigger 
             trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
             
-            #setup raw, info, and events
+            #setup raw, info, events, and specify task type
             raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
             [events,event_ids,task] = get_events_fif(raw,file)
             info = raw.info
@@ -609,7 +612,6 @@ if __name__ == '__main__':
             raw.apply_gradient_compensation(3)
             info = raw.info
             picks = 'grad'
-            'TODO: add xDiva events!!!'
         else:
             print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
         
