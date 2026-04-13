@@ -624,17 +624,23 @@ if __name__ == '__main__':
 
         # --- 2. A Preprocess -------------------------------------------------
         ## start with methods common to both CTF and OPM-MEG
-        # remove bad channels
+        #-- remove bad channels, check for NaNs
         bads = raw.info["bads"]
         raw.drop_channels(bads)
+        bads_NaNs=[]
+        for i in range(0,raw.info["nchan"]):
+            ch_pos = raw.info["chs"][i]["loc"][:3]
+            if np.isnan(ch_pos).any():
+                bads_NaNs.append(raw.info["chs"][i]["ch_name"])
+        raw.drop_channels(bads_NaNs)
         
-        # Notch filter 60Hz, low pass 100Hz, High pass 0.5 Hz
+        #-- Notch filter 60Hz, low pass 100Hz, High pass 0.5 Hz
         raw = filter_raw(raw)
         
-        # Do SSS
+        #-- Do SSS
         raw_sss = sss_prepros(raw)
         
-        # do SSP
+        #-- do SSP, one projector
         raw_pre = ssp_filter(raw_sss)
         
         ## specific to task, device ??
