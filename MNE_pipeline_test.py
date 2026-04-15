@@ -127,10 +127,10 @@ def ssp_filter(raw):
     raw_proj = raw.copy().add_proj(proj)
     return raw_proj
 
-def sss_prepros(raw):
+def sss_prepros(raw,Lin):
     """do traditional SSS with origin 0 in MEG frame"""
     assert raw.info["bads"] == [] # double check bads were dropped
-    raw_sss = mne.preprocessing.maxwell_filter(raw, origin=(0., 0., 0.), int_order=6, ext_order=3, calibration=None, coord_frame='meg', regularize='in', ignore_ref=True, bad_condition='error', mag_scale=100.0, extended_proj=(), verbose=None)  
+    raw_sss = mne.preprocessing.maxwell_filter(raw, origin=(0., 0., 0.), int_order=Lin, ext_order=3, calibration=None, coord_frame='meg', regularize='in', ignore_ref=True, bad_condition='error', mag_scale=100.0, extended_proj=(), verbose=None)  
     return raw_sss
 
 def _eog_artifact(raw):
@@ -604,14 +604,17 @@ if __name__ == '__main__':
             [events,event_ids,task] = get_events_fif(raw,file)
             info = raw.info
             picks = 'mag'
+            reject_criteria = dict(mag=4000e-15)  # 4000fT
+
             
         elif file.endswith(".ds"):
             raw = read_raw_ctf(os.path.join(sample_dir,file), preload=True)
             [events,event_ids,task] = get_events_ctf(raw,file)
-            ## always do this preprocessing, reccommended by Dylan @ UCSF
+            # always do this preprocessing, reccommended by Dylan @ UCSF
             raw.apply_gradient_compensation(3)
             info = raw.info
             picks = 'grad'
+            reject_criteria = dict(grad=4000e-13) #4000 fT/cm
         else:
             print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
         
@@ -638,13 +641,27 @@ if __name__ == '__main__':
         raw = filter_raw(raw)
         
         #-- Do SSS
-        raw_sss = sss_prepros(raw)
+        Lin=6
+        raw_pre = sss_prepros(raw,Lin)
         
         #-- do SSP, one projector
-        raw_pre = ssp_filter(raw_sss)
+        # raw_pre = ssp_filter(raw_sss)
         
         ## specific to task, device ??
         # reject eye blinks
+        reject_blinks = False
+        if reject_blinks ==True:
+            eog_evoked = mne.preprocessing.create_eog_epochs(raw).average()
+            eog_evoked.apply_baseline(baseline=(None, -0.2))
+            eog_evoked.plot_joint()
+            # eog_events = mne.preprocessing.find_eog_events(raw_pre)
+            # onsets = eog_events[:, 0] / raw_pre.info["sfreq"] - 0.25
+            # durations = [0.5] * len(eog_events)
+            # descriptions = ["bad blink"] * len(eog_events)
+            # blink_annot = mne.Annotations(
+            #     onsets, durations, descriptions, orig_time=raw.info["meas_date"]
+            # )
+            # raw_pre.set_annotations(blink_annot)
 
         
         # --- 2.B visualize sensor alignment and BEM---------------------------------
@@ -670,8 +687,18 @@ if __name__ == '__main__':
         # --- 3. Make Epochs and Evokeds --------------------------------------
         tmin = -0.05  # start of each epoch (200ms before the trigger)
         tmax = 0.35  # end of each epoch (600ms after the trigger)
+        # can add rejection criteria based on P-to-P signal        
         # separate out by event ID
-        epochs = mne.Epochs(raw_pre, events, event_ids, tmin, tmax, picks=picks, baseline=(None, 0))
+        epochs = mne.Epochs(
+            raw_pre, 
+            events, 
+            event_ids, 
+            tmin, 
+            tmax, 
+            picks=picks,
+            #reject=reject_criteria,
+            #baseline=(None, 0)
+            )
         evokeds = [epochs[name].average() for name in event_ids]
         conds = list(event_ids.keys())
         if viz_bool:
@@ -804,12 +831,15 @@ if __name__ == '__main__':
         
         # --- 9. Generate and save MNE Report ---------------------------------
         if save_report:
-            report = mne.Report(title="Raw example")
+            report = mne.Report(title="Report for subject: "+subject + ", Task: "+ task)
             report.add_raw(raw=raw, title= file , psd=True)
+            report.add_trans(trans=trans, info=raw.info, title='Coregistration',subject=subject,subjects_dir=subjects_dir)
             report.add_events(events=events, title='Events from "events"', sfreq=sfreq)
             report.add_epochs(epochs=epochs, title='Epochs from "epochs"')
             report.add_evokeds(evokeds=evoked,titles= 'Evoked')
             report.add_covariance(cov=cov, info=raw.info, title="Covariance")
+            report.add_bem(subject=subject, title='BEM')
+            report.add_stc(stc=stc, title="STC")
             report.save(file + "report_raw.html", overwrite=True)
         
 
