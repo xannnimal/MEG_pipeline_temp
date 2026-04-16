@@ -59,7 +59,7 @@ def get_events_fif(raw,file):
         }
     if "Tones" in file:
         task = "Tones"
-        event_id = { #tones
+        event_id = { #tones, 300 samples between toneCnd/200
             "Cnd11": 11,
             "Cnd12": 12,
             "Cnd13": 13,
@@ -113,9 +113,7 @@ def get_events_ctf(raw,file):
         print("no valid events detected, please double check data file name")
     return events, event_id, task
 
-def filter_raw(raw):
-    freq_min = 0.5
-    freq_max = 80
+def filter_raw(raw,freq_min,freq_max):
     raw.load_data().filter(l_freq=freq_min, h_freq=freq_max)
     meg_picks = mne.pick_types(raw.info, meg=True)
     raw.notch_filter(freqs=60, picks=meg_picks)
@@ -123,7 +121,7 @@ def filter_raw(raw):
     
 def ssp_filter(raw):
     # SSP projector
-    proj = mne.compute_proj_raw(raw, start=0, stop=None, duration=1, n_grad=0, n_mag=1, n_eeg=0, reject=None, flat=None, n_jobs=None, meg='separate', verbose=None)
+    proj = mne.compute_proj_raw(raw, start=0, stop=None, duration=1, n_grad=0, n_mag=2, n_eeg=0, reject=None, flat=None, n_jobs=None, meg='separate', verbose=None)
     raw_proj = raw.copy().add_proj(proj)
     return raw_proj
 
@@ -637,15 +635,18 @@ if __name__ == '__main__':
                 bads_NaNs.append(raw.info["chs"][i]["ch_name"])
         raw.drop_channels(bads_NaNs)
         
-        #-- Notch filter 60Hz, low pass 100Hz, High pass 0.5 Hz
-        raw = filter_raw(raw)
+        #-- Notch filter 60Hz, low pass and high pass
+        freq_min = 1
+        freq_max = 50
+        raw = filter_raw(raw,freq_min,freq_max)
+        #downsample?
         
         #-- Do SSS
-        Lin=6
-        raw_pre = sss_prepros(raw,Lin)
+        Lin=8
+        raw_sss = sss_prepros(raw,Lin)
         
         #-- do SSP, one projector
-        # raw_pre = ssp_filter(raw_sss)
+        raw_pre = ssp_filter(raw_sss)
         
         ## specific to task, device ??
         # reject eye blinks
@@ -686,7 +687,8 @@ if __name__ == '__main__':
             
         # --- 3. Make Epochs and Evokeds --------------------------------------
         tmin = -0.05  # start of each epoch (200ms before the trigger)
-        tmax = 0.35  # end of each epoch (600ms after the trigger)
+        tmax = 0.3  # end of each epoch (600ms after the trigger)
+        baseline = (None,0)
         # can add rejection criteria based on P-to-P signal        
         # separate out by event ID
         epochs = mne.Epochs(
@@ -697,7 +699,7 @@ if __name__ == '__main__':
             tmax, 
             picks=picks,
             #reject=reject_criteria,
-            #baseline=(None, 0)
+            # baseline=baseline
             )
         evokeds = [epochs[name].average() for name in event_ids]
         conds = list(event_ids.keys())
