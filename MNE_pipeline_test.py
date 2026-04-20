@@ -23,6 +23,7 @@ Full pipeline description:
 """
 # --- Dependencies ------------------------------------------------------------
 import os
+import pandas as pd
 import warnings
 import numpy as np
 import nibabel as nib
@@ -45,18 +46,44 @@ def get_events_fif(raw,file):
     events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
     if "VWFA" in file:
         task = "VWFA"
-        event_id = { #VWFA
-            "Cnd1": 1,
-            "Cnd2": 2,
-            "Cnd3": 3,
-            "Cnd4": 4,
-            "Cnd5": 5,
-            "Cnd6": 6,
-            "Cnd7": 7,
-            "Cnd8": 8,
-            "Cnd9": 9,
-            "EndEpoch": 200
-        }
+        event_code_list = events[:, 2]
+        event_code_updates = np.zeros_like(event_code_list)
+        special_codes = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9])
+        ei = 0
+        while ei < len(event_code_list):
+            event = event_code_list[ei]
+            if event in special_codes:
+                event_code_updates[ei+1:ei+5] = event
+                event_code_updates[ei] = 201  # code for what was the condition label
+                ei += 4  # skip next 4 positions in input too
+            else:
+                ei += 1  # just advance by 1 if no match
+        events[:, 2] = event_code_updates
+        # get just the code part
+        trigger_codes = events[:, 2]
+        blocks = trigger_codes.reshape(-1, 5)
+        blocks_rearranged = blocks[:, [1, 2, 3, 4, 0]]
+        result = blocks_rearranged.flatten()
+        events[:, 2] = result
+        # make event codes interpretable
+        code_dict = {1: 'highFreqWords_Sloan',
+                     2: 'pseudowords_Sloan',
+                     3: 'consonants_Sloan',
+                     4: 'falseFontsHigh_Sloan',
+                     5: 'highFreqWords_Courier',
+                     6: 'pseudowords_Courier',
+                     7: 'consonants_Courier',
+                     8: 'falseFontsHigh_Courier',
+                     9: 'weird_thing',
+                     201: 'stimulusoffset_-'
+                     }
+        
+        # make into a nice pandas dataframe
+        events_df = pd.DataFrame()
+        events_df['code'] = events[:, 2]
+        events_df['condition'] = [code_dict[c].split('_')[0] for c in events[:, 2]]
+        events_df['font'] = [code_dict[c].split('_')[1] for c in events[:, 2]]
+        
     if "Tones" in file:
         task = "Tones"
         event_id = { #tones, 300 samples between toneCnd/200
@@ -75,7 +102,7 @@ def get_events_fif(raw,file):
         }
     else:
         print("no valid events detected, please double check data file name")
-    return events, event_id, task
+    return events_df, events, task
 
 def get_events_ctf(raw,file):
     events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
@@ -587,7 +614,7 @@ def plot3Dhelmetwithhpi(raw,ax,showLabels=True,showDevice=True,thetitle=''):
 # --- Main (example usage) ----------------------------------------------------
 if __name__ == '__main__':
    # --- Load user-specific config (copy config_template.py -> config.py and fill in your paths)
-    from config_XM import sample_dir, raw_files, trans, subjects_dir, subject, viz_bool, save_report
+    from config_XM import sample_dir, raw_files, trans, subjects_dir, subject, viz_bool, sss_bool, save_report
     
     ## 1. Load and setup data
     for file in raw_files:
@@ -599,7 +626,7 @@ if __name__ == '__main__':
             
             #setup raw, info, events, and specify task type
             raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
-            [events,event_ids,task] = get_events_fif(raw,file)
+            [events_df,events,task] = get_events_fif(raw,file)
             info = raw.info
             picks = 'mag'
             reject_criteria = dict(mag=4000e-15)  # 4000fT
@@ -607,7 +634,7 @@ if __name__ == '__main__':
             
         elif file.endswith(".ds"):
             raw = read_raw_ctf(os.path.join(sample_dir,file), preload=True)
-            [events,event_ids,task] = get_events_ctf(raw,file)
+            [events_df,events,task] = get_events_ctf(raw,file)
             # always do this preprocessing, reccommended by Dylan @ UCSF
             raw.apply_gradient_compensation(3)
             info = raw.info
@@ -616,12 +643,20 @@ if __name__ == '__main__':
         else:
             print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
         
+        
         # --- 1.B Look at Events -----------------------------------------------
         ## save events
         # mne.write_events( participant + '/' + participant + '_events.fif',events)
+        sfreq = raw.info["sfreq"]
         if viz_bool:
-            sfreq = raw.info["sfreq"]
-            fig = mne.viz.plot_events(events, sfreq=raw.info["sfreq"], first_samp=raw.first_samp, event_id=event_ids)
+            fig = mne.viz.plot_events(events, sfreq=raw.info["sfreq"], first_samp=raw.first_samp)
+        ##set up report
+        if save_report:
+            report = mne.Report(title="Report for subject: "+subject + ", Task: "+ task)
+            report.add_raw(raw=raw, title= file , psd=True)
+            report.add_trans(trans=trans, info=raw.info, title='Coregistration',subject=subject,subjects_dir=subjects_dir)
+            report.add_events(events=events, title='Events from "events"', sfreq=sfreq)
+            
 
         # --- 2. A Preprocess -------------------------------------------------
         ## start with methods common to both CTF and OPM-MEG
@@ -636,34 +671,19 @@ if __name__ == '__main__':
         raw.drop_channels(bads_NaNs)
         
         #-- Notch filter 60Hz, low pass and high pass
-        freq_min = 1
+        freq_min = 0.5
         freq_max = 50
         raw = filter_raw(raw,freq_min,freq_max)
         #downsample?
         
         #-- Do SSS
-        Lin=8
-        raw_sss = sss_prepros(raw,Lin)
+        if sss_bool:
+            Lin=8
+            raw = sss_prepros(raw,Lin)
         
         #-- do SSP, one projector
-        raw_pre = ssp_filter(raw_sss)
+        #raw_pre = ssp_filter(raw)
         
-        ## specific to task, device ??
-        # reject eye blinks
-        reject_blinks = False
-        if reject_blinks ==True:
-            eog_evoked = mne.preprocessing.create_eog_epochs(raw).average()
-            eog_evoked.apply_baseline(baseline=(None, -0.2))
-            eog_evoked.plot_joint()
-            # eog_events = mne.preprocessing.find_eog_events(raw_pre)
-            # onsets = eog_events[:, 0] / raw_pre.info["sfreq"] - 0.25
-            # durations = [0.5] * len(eog_events)
-            # descriptions = ["bad blink"] * len(eog_events)
-            # blink_annot = mne.Annotations(
-            #     onsets, durations, descriptions, orig_time=raw.info["meas_date"]
-            # )
-            # raw_pre.set_annotations(blink_annot)
-
         
         # --- 2.B visualize sensor alignment and BEM---------------------------------
         if viz_bool:
@@ -691,32 +711,34 @@ if __name__ == '__main__':
         baseline = (None,0)
         # can add rejection criteria based on P-to-P signal        
         # separate out by event ID
-        epochs = mne.Epochs(
-            raw_pre, 
-            events, 
-            event_ids, 
-            tmin, 
-            tmax, 
-            picks=picks,
-            #reject=reject_criteria,
-            # baseline=baseline
-            )
-        evokeds = [epochs[name].average() for name in event_ids]
-        conds = list(event_ids.keys())
-        if viz_bool:
-            for i in range(0,len(conds)):
+        epochs = mne.Epochs(raw, events, 
+                    tmin=tmin, tmax=tmax,
+                    baseline=baseline,
+                    reject=None,
+                    preload=True, metadata=events_df)
+     
+        evokeds = dict()
+        query = "condition == '{}'"
+        for cond in epochs.metadata["condition"].unique():
+            evokeds[str(cond)] = epochs[query.format(cond)].average()
+            if save_report:
+                report.add_evokeds(evokeds = evokeds[str(cond)], titles=[cond])
+            if viz_bool:
                 ts_args = ts_args = dict(time_unit="s") # can specify limits as ylim=dict(mag=(-400, 400)))
                 topomap_args = dict(time_unit="s") # you can pass other args here, like 'vmin', 'vmax', 'cmap', etc.
-                fig = evokeds[i].plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args,title=file + ' Task: '+ task + ', Condition: ' +conds[i] )
+                fig = evokeds[cond].plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args,title=file + ' Task: '+ task + ', Condition: ' + str(cond) )
+        
+        # evokeds = [epochs[name].average() for name in event_ids]
+        # conds = list(event_ids.keys())
           
-        # average over all conditions within the Task
-        epochs_task = mne.Epochs(raw_pre, events, picks=[picks], tmin=tmin, tmax=tmax, preload=True)
-        evoked = epochs_task.average()
-        if viz_bool:
-            ## specify plotting args
-            ts_args = ts_args = dict(time_unit="s") 
-            topomap_args = dict(time_unit="s") 
-            fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file+ ' Task: '+ task)
+        # # average over all conditions within the Task
+        # epochs_task = mne.Epochs(raw_pre, events, picks=[picks], tmin=tmin, tmax=tmax, preload=True)
+        # evoked = epochs_task.average()
+        # if viz_bool:
+        #     ## specify plotting args
+        #     ts_args = ts_args = dict(time_unit="s") 
+        #     topomap_args = dict(time_unit="s") 
+        #     fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file+ ' Task: '+ task)
         
         # --- 4. Create covariance --------------------------------------------
         cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank=None)
@@ -771,79 +793,67 @@ if __name__ == '__main__':
         # fwd = mne.read_forward_solution(f'{subjects_dir}/{subject}/bem/{subject}-fwd.fif')
         # cov = mne.read_cov(f'{sample_dir}/V1Loc_empirical_cov.fif')
         # stc, inv_op = make_inverse(subjects_dir, subject, fwd, evoked, cov, inverse_method="dSPM")
-        inv_operator = mne.minimum_norm.make_inverse_operator(evoked.info, fwd, cov, loose = 1, depth = None, fixed = False)
-        # ## apply inverse for each condition 
-                
-        
-        # # --- 7. Apply inverse to evokeds -------------------------------------
-        method = "dSPM"  # could choose MNE, sLORETA, or eLORETA instead
-        snr = 2.0
-        lambda2 = 1.0 / snr**2
-        stc, residual = apply_inverse(
-            evoked,
-            inv_operator,
-            lambda2,
-            method=method,
-            pick_ori=None,
-            return_residual=True,
-            verbose=True)
-        
-        
-        # --- 8. Visualize inverse --------------------------------------------
-        if viz_bool: 
-            vertno_max, time_max = stc.get_peak(hemi="rh")
-            surfer_kwargs = dict(
-                hemi="split",
-                subjects_dir=subjects_dir, # clim=dict(kind="value"), lims=[12,20,28]
-                views=["caudal", "medial"], # for visual task
-                initial_time=time_max,
-                time_unit="s",
-                size=(800, 800),
-                smoothing_steps=5)
-
-            brain = stc.plot(**surfer_kwargs)
-            brain.plotter.scalar_bar.GetLabelTextProperty().SetFontSize(8)
-            # These params are tested to fit if you have two views (one on top and one at the bottom) with splitted hemi. eg. views=["caudal", "medial"]
-            # You should change this if you have single view only
-            sb = brain.plotter.scalar_bar
-            x, _ = sb.GetPosition()
-            sb.SetPosition(x, 0.6)  # vertically between caudal (top) and medial (bottom) rows
-            w, h = sb.GetPosition2()
-            sb.SetPosition2(w, h * 0.5)  # shrink height so top of the color bar doesn't clip
-            for renderer in brain.plotter.renderers:
-                for actor in renderer.GetActors2D():
-                    if hasattr(actor, 'GetTextProperty'):
-                        actor.GetTextProperty().SetFontSize(7)
-            brain.add_foci(
-                vertno_max,
-                coords_as_verts=True,
-                hemi="rh",
-                color="blue",
-                scale_factor=0.6,
-                alpha=0.5)
-            brain.add_text(0.1, 0.9, "dSPM, Task: " + task, "title", font_size=8)
+        query = "condition == '{}"
+        for cond in epochs.metadata["condition"].unique():
+            inv_operator = mne.minimum_norm.make_inverse_operator(evokeds[cond].info, fwd, cov, loose = 1, depth = None, fixed = False)
+            # # --- 7. Apply inverse to evokeds -------------------------------------
+            method = "dSPM"  # could choose MNE, sLORETA, or eLORETA instead
+            snr = 2.0
+            lambda2 = 1.0 / snr**2
+            stc, residual = apply_inverse(
+                evokeds[cond],
+                inv_operator,
+                lambda2,
+                method=method,
+                pick_ori=None,
+                return_residual=True,
+                verbose=True)
             
-        # evoked.crop(0.07, 0.13)
-        # dip = mne.fit_dipole(evoked, cov, bem, trans)[0]
-        # dip.plot_locations(trans, subject, subjects_dir)
-       
-        
+            # --- 8. Visualize inverse --------------------------------------------
+            if viz_bool: 
+                vertno_max, time_max = stc.get_peak(hemi="rh")
+                surfer_kwargs = dict(
+                    hemi="split",
+                    subjects_dir=subjects_dir, # clim=dict(kind="value"), lims=[12,20,28]
+                    views=["caudal", "medial"], # for visual task
+                    initial_time=time_max,
+                    time_unit="s",
+                    size=(800, 800),
+                    smoothing_steps=5)
+
+                brain = stc.plot(**surfer_kwargs)
+                brain.plotter.scalar_bar.GetLabelTextProperty().SetFontSize(8)
+                # These params are tested to fit if you have two views (one on top and one at the bottom) with splitted hemi. eg. views=["caudal", "medial"]
+                # You should change this if you have single view only
+                sb = brain.plotter.scalar_bar
+                x, _ = sb.GetPosition()
+                sb.SetPosition(x, 0.6)  # vertically between caudal (top) and medial (bottom) rows
+                w, h = sb.GetPosition2()
+                sb.SetPosition2(w, h * 0.5)  # shrink height so top of the color bar doesn't clip
+                for renderer in brain.plotter.renderers:
+                    for actor in renderer.GetActors2D():
+                        if hasattr(actor, 'GetTextProperty'):
+                            actor.GetTextProperty().SetFontSize(7)
+                brain.add_foci(
+                    vertno_max,
+                    coords_as_verts=True,
+                    hemi="rh",
+                    color="blue",
+                    scale_factor=0.6,
+                    alpha=0.5)
+                brain.add_text(0.1, 0.9, "dSPM, Task: " + task, "title", font_size=8)
+                
         # # --- 8. Save all files in BIDS structure -----------------------------
         # #stc, inv_op = make_inverse(subjects_dir, subject_id, fwd, evoked, noise_cov)
         
         # --- 9. Generate and save MNE Report ---------------------------------
         if save_report:
-            report = mne.Report(title="Report for subject: "+subject + ", Task: "+ task)
-            report.add_raw(raw=raw, title= file , psd=True)
-            report.add_trans(trans=trans, info=raw.info, title='Coregistration',subject=subject,subjects_dir=subjects_dir)
-            report.add_events(events=events, title='Events from "events"', sfreq=sfreq)
             report.add_epochs(epochs=epochs, title='Epochs from "epochs"')
-            report.add_evokeds(evokeds=evoked,titles= 'Evoked')
             report.add_covariance(cov=cov, info=raw.info, title="Covariance")
             report.add_bem(subject=subject, title='BEM')
             report.add_stc(stc=stc, title="STC")
             report.save(file + "report_raw.html", overwrite=True)
-        
+    
 
 
 
