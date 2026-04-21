@@ -41,7 +41,7 @@ warnings.filterwarnings("ignore", message="numpy.dtype size changed")
 warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
 # --- FUNCTIONS ---------------------------------------------------------------
-# --- Load, find events, preprocess -------------------------------------------
+# --- Load, find events, and rename/order them --------------------------------
 def get_events_fif(raw,file):
     events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
     if "VWFA" in file:
@@ -55,7 +55,7 @@ def get_events_fif(raw,file):
             if event in special_codes:
                 event_code_updates[ei+1:ei+5] = event
                 event_code_updates[ei] = 201  # code for what was the condition label
-                ei += 4  # skip next 4 positions in input too
+                ei += 4  # skip next 4 positions 
             else:
                 ei += 1  # just advance by 1 if no match
         events[:, 2] = event_code_updates
@@ -74,8 +74,8 @@ def get_events_fif(raw,file):
                      6: 'pseudowords_Courier',
                      7: 'consonants_Courier',
                      8: 'falseFontsHigh_Courier',
-                     9: 'weird_thing',
-                     201: 'stimulusoffset_-'
+                     9: 'background_',
+                     201: 'stimulusoffset_'
                      }
         
         # make into a nice pandas dataframe
@@ -86,60 +86,171 @@ def get_events_fif(raw,file):
         
     if "Tones" in file:
         task = "Tones"
-        event_id = { #tones, 300 samples between toneCnd/200
-            "Cnd11": 11,
-            "Cnd12": 12,
-            "Cnd13": 13,
-            "Cnd14": 14,
-            "Cnd15": 15,
-            "EndEpoch": 200
-        }
+        ## tones don't need modification (?)
+        # event_code_list = events[:, 2]
+        # event_code_updates = np.zeros_like(event_code_list)
+        # special_codes = np.array([10, 11, 12, 13, 14, 15])
+        # ei = 0
+        # while ei < len(event_code_list):
+        #     event = event_code_list[ei]
+        #     if event in special_codes:
+        #         event_code_updates[ei+1:ei+2] = event
+        #         event_code_updates[ei] = 201  # code for what was the condition label
+        #         ei += 2  # skip next 1 positions 
+        #     else:
+        #         ei += 1  # just advance by 1 if no match
+        # events[:, 2] = event_code_updates
+        # # get just the code part
+        # trigger_codes = events[:, 2]
+        # blocks = trigger_codes.reshape(-1, 2)
+        # blocks_rearranged = blocks[:, [1, 0]]
+        # result = blocks_rearranged.flatten()
+        # events[:, 2] = result
+        ## make event codes interpretable
+        code_dict = {10: '250_Hz',
+                     11: '500_Hz',
+                     12: '1000_Hz',
+                     13: '2000_Hz',
+                     14: '4000_Hz',
+                     15: 'background_',
+                     200: 'stimulusoffset_'
+                     }
+        # make into a nice pandas dataframe
+        events_df = pd.DataFrame()
+        events_df['code'] = events[:, 2]
+        events_df['condition'] = [code_dict[c].split('_')[0] for c in events[:, 2]]
+        events_df['units'] = [code_dict[c].split('_')[1] for c in events[:, 2]]
+        
+        
+        
     if "V1Loc" in file:
         task = "V1Loc"
-        event_id = { #V1Loc
-            "Cnd16": 16,
-            "EndEpoch": 200 
+        event_code_list = events[:, 2]
+        event_code_updates = np.zeros_like(event_code_list)
+        special_codes = np.array([16])
+        ei = 0
+        while ei < len(event_code_list):
+            event = event_code_list[ei]
+            if event in special_codes:
+                event_code_updates[ei+1:ei+8] = event
+                event_code_updates[ei] = 201  # code for what was the condition label
+                ei += 7  # skip next 7 positions
+            else:
+                ei += 1  # just advance by 1 if no match
+        events[:, 2] = event_code_updates
+        # get just the code part
+        trigger_codes = events[:, 2]
+        blocks = trigger_codes.reshape(-1, 8)
+        blocks_rearranged = blocks[:, [1, 2, 3, 4, 5, 6, 7, 0]]
+        result = blocks_rearranged.flatten()
+        events[:, 2] = result
+        # make event codes interpretable
+        code_dict = { #V1Loc
+            16: "checkerboard",
+            201: "stimulusoffset"
         }
+        # make into a nice pandas dataframe
+        events_df = pd.DataFrame()
+        events_df['code'] = events[:, 2]
+        events_df['condition'] = [code_dict[c] for c in events[:, 2]]
+        
     else:
         print("no valid events detected, please double check data file name")
     return events_df, events, task
 
+# -- events for CTF
 def get_events_ctf(raw,file):
     events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
     if "VWFA" in file:
-        task= "VWFA"
-        event_id = { #VWFA
-            "Cnd1": 65536,
-            "Cnd2": 131072,
-            "Cnd3": 196608,
-            "Cnd4": 262144,
-            "Cnd5": 327680,
-            "Cnd6": 393216,
-            "Cnd7": 458752,
-            "Cnd8": 524288,
-            "Cnd9": 589824,
-            "EndEpoch": 13107200 
-        }
+        task = "VWFA"
+        event_code_list = events[:, 2]
+        event_code_updates = np.zeros_like(event_code_list)
+        special_codes = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9])
+        ei = 0
+        while ei < len(event_code_list):
+            event = event_code_list[ei]
+            if event in special_codes:
+                event_code_updates[ei+1:ei+5] = event
+                event_code_updates[ei] = 13107200  # code for what was the condition label
+                ei += 4  # skip next 4 positions 
+            else:
+                ei += 1  # just advance by 1 if no match
+        events[:, 2] = event_code_updates
+        # get just the code part
+        trigger_codes = events[:, 2]
+        blocks = trigger_codes.reshape(-1, 5)
+        blocks_rearranged = blocks[:, [1, 2, 3, 4, 0]]
+        result = blocks_rearranged.flatten()
+        events[:, 2] = result
+        # make event codes interpretable
+        code_dict = {65536: 'highFreqWords_Sloan',
+                     131072: 'pseudowords_Sloan',
+                     196608: 'consonants_Sloan',
+                     262144: 'falseFontsHigh_Sloan',
+                     327680: 'highFreqWords_Courier',
+                     393216: 'pseudowords_Courier',
+                     458752: 'consonants_Courier',
+                     524288: 'falseFontsHigh_Courier',
+                     589824: 'background_',
+                     13107200 : 'stimulusoffset_'
+                     }
+        # make into a nice pandas dataframe
+        events_df = pd.DataFrame()
+        events_df['code'] = events[:, 2]
+        events_df['condition'] = [code_dict[c].split('_')[0] for c in events[:, 2]]
+        events_df['font'] = [code_dict[c].split('_')[1] for c in events[:, 2]]
+        
     if "Tones" in file:
-        task = "Tones"
-        event_id = { #tones
-            "Cnd11": 720896,
-            "Cnd12": 786432,
-            "Cnd13": 851968,
-            "Cnd14": 917504,
-            "Cnd15": 983040,
-            "EndEpoch": 13107200 
-        }
+        code_dict = {#10: '250_Hz', ##broken code
+                     720896: '500_Hz',
+                     786432: '1000_Hz',
+                     851968: '2000_Hz',
+                     917504: '4000_Hz',
+                     983040: 'background_',
+                     13107200: 'stimulusoffset_'
+                     }
+        # make into a nice pandas dataframe
+        events_df = pd.DataFrame()
+        events_df['code'] = events[:, 2]
+        events_df['condition'] = [code_dict[c].split('_')[0] for c in events[:, 2]]
+        events_df['units'] = [code_dict[c].split('_')[1] for c in events[:, 2]]
+           
     if "V1Loc" in file:
         task = "V1Loc"
-        event_id = { #V1Loc
-            "Cnd16": 1048576,
-            "EndEpoch": 13107200 
+        event_code_list = events[:, 2]
+        event_code_updates = np.zeros_like(event_code_list)
+        special_codes = np.array([16])
+        ei = 0
+        while ei < len(event_code_list):
+            event = event_code_list[ei]
+            if event in special_codes:
+                event_code_updates[ei+1:ei+8] = event
+                event_code_updates[ei] = 13107200 # code for what was the condition label
+                ei += 7  # skip next 7 positions
+            else:
+                ei += 1  # just advance by 1 if no match
+        events[:, 2] = event_code_updates
+        # get just the code part
+        trigger_codes = events[:, 2]
+        blocks = trigger_codes.reshape(-1, 8)
+        blocks_rearranged = blocks[:, [1, 2, 3, 4, 5, 6, 7, 0]]
+        result = blocks_rearranged.flatten()
+        events[:, 2] = result
+        # make event codes interpretable
+        code_dict = { #V1Loc
+            1048576: "checkerboard",
+            13107200: "stimulusoffset"
         }
+        # make into a nice pandas dataframe
+        events_df = pd.DataFrame()
+        events_df['code'] = events[:, 2]
+        events_df['condition'] = [code_dict[c] for c in events[:, 2]]
+        
     else:
         print("no valid events detected, please double check data file name")
-    return events, event_id, task
-
+    return events_df, events, task
+        
+## -- Preprocessing Functions -------------------------------------------------
 def filter_raw(raw,freq_min,freq_max):
     raw.load_data().filter(l_freq=freq_min, h_freq=freq_max)
     meg_picks = mne.pick_types(raw.info, meg=True)
