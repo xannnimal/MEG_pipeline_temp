@@ -926,7 +926,7 @@ if __name__ == '__main__':
                 surfer_kwargs = dict(
                     hemi="split",
                     subjects_dir=subjects_dir, # clim=dict(kind="value"), lims=[12,20,28]
-                    views=["caudal", "medial"], # for visual task
+                    views=["caudal","medial"], # for visual task
                     initial_time=time_max,
                     time_unit="s",
                     size=(800, 800),
@@ -940,7 +940,7 @@ if __name__ == '__main__':
                 x, _ = sb.GetPosition()
                 sb.SetPosition(x, 0.6)  # vertically between caudal (top) and medial (bottom) rows
                 w, h = sb.GetPosition2()
-                sb.SetPosition2(w, h * 0.5)  # shrink height so top of the color bar doesn't clip
+                sb.SetPosition2(w, h* 0.5)  # shrink height so top of the color bar doesn't clip
                 for renderer in brain.plotter.renderers:
                     for actor in renderer.GetActors2D():
                         if hasattr(actor, 'GetTextProperty'):
