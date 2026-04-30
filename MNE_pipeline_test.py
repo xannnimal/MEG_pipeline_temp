@@ -165,7 +165,7 @@ def get_events_ctf(raw,file):
         task = "VWFA"
         event_code_list = events[:, 2]
         event_code_updates = np.zeros_like(event_code_list)
-        special_codes = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9])
+        special_codes = np.array([65536, 131072, 196608, 262144, 327680, 393216, 458752, 524288, 589824])
         ei = 0
         while ei < len(event_code_list):
             event = event_code_list[ei]
@@ -219,7 +219,7 @@ def get_events_ctf(raw,file):
         task = "V1Loc"
         event_code_list = events[:, 2]
         event_code_updates = np.zeros_like(event_code_list)
-        special_codes = np.array([16])
+        special_codes = np.array([1048576])
         ei = 0
         while ei < len(event_code_list):
             event = event_code_list[ei]
@@ -238,8 +238,8 @@ def get_events_ctf(raw,file):
         events[:, 2] = result
         # make event codes interpretable
         code_dict = { #V1Loc
-            1048576: "checkerboard",
-            13107200: "stimulusoffset"
+            1048576: "checkerboard_",
+            13107200: "stimulusoffset_"
         }
         # make into a nice pandas dataframe
         events_df = pd.DataFrame()
@@ -744,6 +744,7 @@ if __name__ == '__main__':
 
             
         elif file.endswith(".ds"):
+            trigger_chan="STIM"
             raw = read_raw_ctf(os.path.join(sample_dir,file), preload=True)
             [events_df,events,task] = get_events_ctf(raw,file)
             # always do this preprocessing, reccommended by Dylan @ UCSF
@@ -865,7 +866,7 @@ if __name__ == '__main__':
         model = mne.make_bem_model(subject=subject, ico=4, conductivity=conductivity, subjects_dir=subjects_dir)
         bem = mne.make_bem_solution(model)
         fwd = mne.make_forward_solution(
-            os.path.join(sample_dir,file),
+            raw.info,
             trans=trans,
             src=src,
             bem=bem,
