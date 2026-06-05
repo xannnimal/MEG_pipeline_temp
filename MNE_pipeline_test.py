@@ -40,12 +40,12 @@ from mne.surface import read_surface
 warnings.filterwarnings("ignore", message="numpy.dtype size changed")
 warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
+
 # --- FUNCTIONS ---------------------------------------------------------------
 # --- Load, find events, and rename/order them --------------------------------
-def get_events_fif(raw,file):
+def get_events_fif(raw,task,trigger_chan):
     events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
-    if "VWFA" in file:
-        task = "VWFA"
+    if task=="VWFA":
         event_code_list = events[:, 2]
         event_code_updates = np.zeros_like(event_code_list)
         special_codes = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9])
@@ -84,29 +84,7 @@ def get_events_fif(raw,file):
         events_df['condition'] = [code_dict[c].split('_')[0] for c in events[:, 2]]
         events_df['font'] = [code_dict[c].split('_')[1] for c in events[:, 2]]
         
-    if "Tones" in file:
-        task = "Tones"
-        ## tones don't need modification (?)
-        # event_code_list = events[:, 2]
-        # event_code_updates = np.zeros_like(event_code_list)
-        # special_codes = np.array([10, 11, 12, 13, 14, 15])
-        # ei = 0
-        # while ei < len(event_code_list):
-        #     event = event_code_list[ei]
-        #     if event in special_codes:
-        #         event_code_updates[ei+1:ei+2] = event
-        #         event_code_updates[ei] = 201  # code for what was the condition label
-        #         ei += 2  # skip next 1 positions 
-        #     else:
-        #         ei += 1  # just advance by 1 if no match
-        # events[:, 2] = event_code_updates
-        # # get just the code part
-        # trigger_codes = events[:, 2]
-        # blocks = trigger_codes.reshape(-1, 2)
-        # blocks_rearranged = blocks[:, [1, 0]]
-        # result = blocks_rearranged.flatten()
-        # events[:, 2] = result
-        ## make event codes interpretable
+    if task=="Tones":
         code_dict = {10: '250_Hz',
                      11: '500_Hz',
                      12: '1000_Hz',
@@ -121,57 +99,74 @@ def get_events_fif(raw,file):
         events_df['condition'] = [code_dict[c].split('_')[0] for c in events[:, 2]]
         events_df['units'] = [code_dict[c].split('_')[1] for c in events[:, 2]]
         
-        
-        
-    if "V1Loc" in file:
-        task = "V1Loc"
-        event_code_list = events[:, 2]
-        event_code_updates = np.zeros_like(event_code_list)
-        special_codes = np.array([16])
-        ei = 0
-        while ei < len(event_code_list):
-            event = event_code_list[ei]
-            if event in special_codes:
-                event_code_updates[ei+1:ei+8] = event
-                event_code_updates[ei] = 201  # code for what was the condition label
-                ei += 7  # skip next 7 positions
-            else:
-                ei += 1  # just advance by 1 if no match
-        events[:, 2] = event_code_updates
-        # get just the code part
-        trigger_codes = events[:, 2]
-        blocks = trigger_codes.reshape(-1, 8)
-        blocks_rearranged = blocks[:, [1, 2, 3, 4, 5, 6, 7, 0]]
-        result = blocks_rearranged.flatten()
-        events[:, 2] = result
-        # make event codes interpretable
-        code_dict = { #V1Loc
-            16: "checkerboard",
-            201: "stimulusoffset"
+    if task == "V1Loc":
+        TRIAL_ID = 16   # trial-onset trigger (equivalent to EEG DIN4)
+        BIN_ID   = 200  # bin-onset trigger   (equivalent to EEG DIN5)
+
+        trial_samples = events[events[:, 2] == TRIAL_ID, 0]
+        bin_samples   = events[events[:, 2] == BIN_ID,   0]
+
+        event_id = {
+            'bin/0': 0, 'bin/1': 1, 'bin/2': 2, 'bin/3': 3, 'bin/4': 4,
+            'noise/prelude':  5,
+            'noise/postlude': 6,
         }
-        # make into a nice pandas dataframe
-        events_df = pd.DataFrame()
-        events_df['code'] = events[:, 2]
-        events_df['condition'] = [code_dict[c] for c in events[:, 2]]
-        
+        label_map = {v: k for k, v in event_id.items()}
+
+        all_events = []
+        for i, trial_start in enumerate(trial_samples):
+            trial_end = trial_samples[i + 1] if i + 1 < len(trial_samples) else np.inf
+            bins_in_trial = bin_samples[(bin_samples >= trial_start) & (bin_samples < trial_end)]
+
+            for pos, s in enumerate(bins_in_trial[:5]):
+                all_events.append([s, 0, pos])
+
+            if len(bins_in_trial) >= 1:
+                all_events.append([trial_start, 0, 5])   # prelude anchored at trial trigger
+
+            if len(bins_in_trial) >= 6:
+                all_events.append([bins_in_trial[5], 0, 6])  # postlude anchored at bin[5]
+
+        all_events = np.array(all_events, dtype=int)
+        all_events = all_events[np.argsort(all_events[:, 0])]
+        events = all_events
+
+        events_df = pd.DataFrame({'condition': [label_map[e[2]] for e in all_events]})
+
     else:
         print("no valid events detected, please double check data file name")
-    return events_df, events, task
-
+    return events_df, events
+#-----------------------------------------------------------
 # -- events for CTF
-def get_events_ctf(raw,file):
+def _get_correct_codes(events):
+    ## check for any accidental 192s
+    for i in range(0,np.shape(events)[0]):
+        if events[i,1]==12582912:
+            events[i-1,2]=13107200
+    ## delete events with error sample in second collumn
+    events = events[events[:, 1] == 0]
+    ## delete events corresponding to any error 512/0 code
+    events = events[events[:, 2] != 512]
+    ## bit shift by 16 to recover normal xDiva codes
+    event_code_list = events[:, 2]
+    for i in range(0,len(event_code_list)):
+        event_code_list[i] = event_code_list[i] >> 16  
+    events[:, 2]=event_code_list
+    return events,event_code_list
+
+def get_events_ctf(raw,task,trigger_chan):
     events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
-    if "VWFA" in file:
-        task = "VWFA"
-        event_code_list = events[:, 2]
+    [events,event_code_list] = _get_correct_codes(events)
+
+    if task =="VWFA":
         event_code_updates = np.zeros_like(event_code_list)
-        special_codes = np.array([65536, 131072, 196608, 262144, 327680, 393216, 458752, 524288, 589824])
+        special_codes = np.array([1,2,3,4,5,6,7,8,9])
         ei = 0
         while ei < len(event_code_list):
             event = event_code_list[ei]
             if event in special_codes:
                 event_code_updates[ei+1:ei+5] = event
-                event_code_updates[ei] = 13107200  # code for what was the condition label
+                event_code_updates[ei] = 201  # code for what was the condition label
                 ei += 4  # skip next 4 positions 
             else:
                 ei += 1  # just advance by 1 if no match
@@ -183,16 +178,16 @@ def get_events_ctf(raw,file):
         result = blocks_rearranged.flatten()
         events[:, 2] = result
         # make event codes interpretable
-        code_dict = {65536: 'highFreqWords_Sloan',
-                     131072: 'pseudowords_Sloan',
-                     196608: 'consonants_Sloan',
-                     262144: 'falseFontsHigh_Sloan',
-                     327680: 'highFreqWords_Courier',
-                     393216: 'pseudowords_Courier',
-                     458752: 'consonants_Courier',
-                     524288: 'falseFontsHigh_Courier',
-                     589824: 'background_',
-                     13107200 : 'stimulusoffset_'
+        code_dict = {1: 'highFreqWords_Sloan',
+                     2: 'pseudowords_Sloan',
+                     3: 'consonants_Sloan',
+                     4: 'falseFontsHigh_Sloan',
+                     5: 'highFreqWords_Courier',
+                     6: 'pseudowords_Courier',
+                     7: 'consonants_Courier',
+                     8: 'falseFontsHigh_Courier',
+                     9: 'background_',
+                     201 : 'stimulusoffset_'
                      }
         # make into a nice pandas dataframe
         events_df = pd.DataFrame()
@@ -200,14 +195,14 @@ def get_events_ctf(raw,file):
         events_df['condition'] = [code_dict[c].split('_')[0] for c in events[:, 2]]
         events_df['font'] = [code_dict[c].split('_')[1] for c in events[:, 2]]
         
-    if "Tones" in file:
-        code_dict = {#10: '250_Hz', ##broken code
-                     720896: '500_Hz',
-                     786432: '1000_Hz',
-                     851968: '2000_Hz',
-                     917504: '4000_Hz',
-                     983040: 'background_',
-                     13107200: 'stimulusoffset_'
+    if task=="Tones":
+        code_dict = {17: '250_Hz', ##broken code
+                     11: '500_Hz',
+                     12: '1000_Hz',
+                     13: '2000_Hz',
+                     14: '4000_Hz',
+                     15: 'background_',
+                     200: 'stimulusoffset_'
                      }
         # make into a nice pandas dataframe
         events_df = pd.DataFrame()
@@ -215,44 +210,49 @@ def get_events_ctf(raw,file):
         events_df['condition'] = [code_dict[c].split('_')[0] for c in events[:, 2]]
         events_df['units'] = [code_dict[c].split('_')[1] for c in events[:, 2]]
            
-    if "V1Loc" in file:
-        task = "V1Loc"
-        event_code_list = events[:, 2]
-        event_code_updates = np.zeros_like(event_code_list)
-        special_codes = np.array([1048576])
-        ei = 0
-        while ei < len(event_code_list):
-            event = event_code_list[ei]
-            if event in special_codes:
-                event_code_updates[ei+1:ei+8] = event
-                event_code_updates[ei] = 13107200 # code for what was the condition label
-                ei += 7  # skip next 7 positions
-            else:
-                ei += 1  # just advance by 1 if no match
-        events[:, 2] = event_code_updates
-        # get just the code part
-        trigger_codes = events[:, 2]
-        blocks = trigger_codes.reshape(-1, 8)
-        blocks_rearranged = blocks[:, [1, 2, 3, 4, 5, 6, 7, 0]]
-        result = blocks_rearranged.flatten()
-        events[:, 2] = result
-        # make event codes interpretable
-        code_dict = { #V1Loc
-            1048576: "checkerboard_",
-            13107200: "stimulusoffset_"
+    if task == "V1Loc":
+        TRIAL_ID = 1048576   # trial-onset trigger (16 * 65536, equivalent to EEG DIN4)
+        BIN_ID   = 13107200  # bin-onset trigger   (200 * 65536, equivalent to EEG DIN5)
+
+        trial_samples = events[events[:, 2] == TRIAL_ID, 0]
+        bin_samples   = events[events[:, 2] == BIN_ID,   0]
+
+        event_id = {
+            'bin/0': 0, 'bin/1': 1, 'bin/2': 2, 'bin/3': 3, 'bin/4': 4,
+            'noise/prelude':  5,
+            'noise/postlude': 6,
         }
-        # make into a nice pandas dataframe
-        events_df = pd.DataFrame()
-        events_df['code'] = events[:, 2]
-        events_df['condition'] = [code_dict[c] for c in events[:, 2]]
-        
+        label_map = {v: k for k, v in event_id.items()}
+
+        all_events = []
+        for i, trial_start in enumerate(trial_samples):
+            trial_end = trial_samples[i + 1] if i + 1 < len(trial_samples) else np.inf
+            bins_in_trial = bin_samples[(bin_samples >= trial_start) & (bin_samples < trial_end)]
+
+            for pos, s in enumerate(bins_in_trial[:5]):
+                all_events.append([s, 0, pos])
+
+            if len(bins_in_trial) >= 1:
+                all_events.append([trial_start, 0, 5])   # prelude anchored at trial trigger
+
+            if len(bins_in_trial) >= 6:
+                all_events.append([bins_in_trial[5], 0, 6])  # postlude anchored at bin[5]
+
+        all_events = np.array(all_events, dtype=int)
+        all_events = all_events[np.argsort(all_events[:, 0])]
+        events = all_events
+
+        events_df = pd.DataFrame({'condition': [label_map[e[2]] for e in all_events]})
+
     else:
         print("no valid events detected, please double check data file name")
-    return events_df, events, task
+    return events_df, events
         
 ## -- Preprocessing Functions -------------------------------------------------
 def filter_raw(raw,freq_min,freq_max):
-    raw.load_data().filter(l_freq=freq_min, h_freq=freq_max)
+    ## TODO
+    raw.load_data().filter(l_freq=freq_min, h_freq=None)
+    raw.filter(l_freq=None, h_freq=freq_max)
     meg_picks = mne.pick_types(raw.info, meg=True)
     raw.notch_filter(freqs=60, picks=meg_picks)
     return raw
@@ -375,7 +375,7 @@ def make_forward(subject_id, subjects_dir, trans, evoked,
                  fixed=True, bem_ico=4, src_space="oct7",
                  conductivity=(0.3, 0.006, 0.3),
                  mindist=5, surface='mid',
-                 visualize=False, verbose=False):
+                 visualize=False, verbose=False, eeg=False, meg=True):
     """Build (or load) the forward solution for a subject.
 
     Parameters
@@ -418,7 +418,8 @@ def make_forward(subject_id, subjects_dir, trans, evoked,
     subject = subject_id
     subjects_dir = str(subjects_dir)
     bem_path = Path(subjects_dir) / subject / 'bem'
-    fwd_path = bem_path / f'{subject}-fwd.fif'
+    modality_tag = 'eeg' if (eeg and not meg) else ('meg' if (meg and not eeg) else 'meeg')
+    fwd_path = bem_path / f'{subject}-{modality_tag}-fwd.fif'
 
     # --- Try loading existing forward ---
     if fwd_path.exists() and not overwrite_fwd:
@@ -448,9 +449,7 @@ def make_forward(subject_id, subjects_dir, trans, evoked,
     bem_sol_fname = bem_path / f'{subject}-scale{scale}-ico{bem_ico}-bem-sol.fif'
 
     if not bem_fname.exists() or overwrite:
-        mne.bem.make_watershed_bem(subject=subject, overwrite=True,
-                                   volume='T1', atlas=True, gcaatlas=True,
-                                   show=visualize)
+        mne.bem.make_watershed_bem(subject=subject, overwrite=True,volume='T1',atlas=True, gcaatlas=True,show=visualize)              
         model = mne.make_bem_model(subject=subject, ico=bem_ico,
                                    conductivity=conductivity)
         mne.write_bem_surfaces(str(bem_fname), model, overwrite=True)
@@ -478,7 +477,7 @@ def make_forward(subject_id, subjects_dir, trans, evoked,
     # --- Compute forward ---
     fwd = mne.make_forward_solution(
         evoked.info, trans=trans, src=src, bem=bem,
-        eeg=False, meg=True, mindist=mindist, n_jobs=None,
+        eeg=eeg, meg=meg, mindist=mindist, n_jobs=None,
     )
     mne.write_forward_solution(str(fwd_path), fwd, overwrite=True)
 
@@ -725,28 +724,43 @@ def plot3Dhelmetwithhpi(raw,ax,showLabels=True,showDevice=True,thetitle=''):
 # --- Main (example usage) ----------------------------------------------------
 if __name__ == '__main__':
    # --- Load user-specific config (copy config_template.py -> config.py and fill in your paths)
-    from config_XM import sample_dir, raw_files, trans, subjects_dir, subject, viz_bool, sss_bool, save_report
+    from config_XM import sample_dir, raw_files, trans, subjects_dir, subject, task, modality, viz_bool, sss_bool, save_report, report_dir, save_raw
+    ## if getting a FreeSurfer error, set this variable to the location of your subjects anatomy
+    # os.environ["SUBJECTS_DIR"] = subjects_dir
     
+
     ## 1. Load and setup data
     for file in raw_files:
         # --- 1. Load data, find events ---------------------------------------
-        if file.endswith(".fif"):
+        if np.size(file) == 1 and file.endswith(".fif"):
             ## load OPM, find events, do preprocessing
             ## specify trigger 
             trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
             
             #setup raw, info, events, and specify task type
             raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
-            [events_df,events,task] = get_events_fif(raw,file)
+            [events_df,events] = get_events_fif(raw,task,trigger_chan)
             info = raw.info
             picks = 'mag'
             reject_criteria = dict(mag=4000e-15)  # 4000fT
-
             
-        elif file.endswith(".ds"):
-            trigger_chan="STIM"
+        ## -- check for datasets that need concatenating --------------------------
+        elif task == 'VWFA' and np.size(file) > 1:
+            if file[0].endswith(".ds"):
+                trigger_chan='STIM'
+                raw = read_raw_ctf(os.path.join(sample_dir,file[0]), preload=True)
+                mne.io.concatenate_raws([raw,read_raw_ctf(os.path.join(sample_dir,file[1]), preload=True)], on_mismatch="ignore")
+                [events_df,events] = get_events_ctf(raw,task,trigger_chan)
+                # always do this preprocessing, reccommended by Dylan @ UCSF
+                raw.apply_gradient_compensation(3)
+                info = raw.info
+                picks = 'grad'
+                reject_criteria = dict(grad=4000e-13) #4000 fT/cm
+                
+        elif file.endswith(".ds"):  
+            trigger_chan='STIM'
             raw = read_raw_ctf(os.path.join(sample_dir,file), preload=True)
-            [events_df,events,task] = get_events_ctf(raw,file)
+            [events_df,events] = get_events_ctf(raw,task,trigger_chan)
             # always do this preprocessing, reccommended by Dylan @ UCSF
             raw.apply_gradient_compensation(3)
             info = raw.info
@@ -765,7 +779,7 @@ if __name__ == '__main__':
         ##set up report
         if save_report:
             report = mne.Report(title="Report for subject: "+subject + ", Task: "+ task)
-            report.add_raw(raw=raw, title= file , psd=True)
+            report.add_raw(raw=raw, title= subject +', '+modality+', '+task, psd=True)
             report.add_trans(trans=trans, info=raw.info, title='Coregistration',subject=subject,subjects_dir=subjects_dir)
             report.add_events(events=events, title='Events from "events"', sfreq=sfreq)
             
@@ -774,17 +788,19 @@ if __name__ == '__main__':
         ## start with methods common to both CTF and OPM-MEG
         #-- remove bad channels, check for NaNs
         bads = raw.info["bads"]
-        raw.drop_channels(bads)
         bads_NaNs=[]
         for i in range(0,raw.info["nchan"]):
             ch_pos = raw.info["chs"][i]["loc"][:3]
             if np.isnan(ch_pos).any():
                 bads_NaNs.append(raw.info["chs"][i]["ch_name"])
-        raw.drop_channels(bads_NaNs)
+        raw.info["bads"].extend(bads_NaNs)
+        raw.drop_channels(bads)
+        ## TODO: add another step for looking at bad channels, when to mark bad on OPM -- obvious in FFT
         
         #-- Notch filter 60Hz, low pass and high pass
+        ## TODO split freq by task
         freq_min = 0.5
-        freq_max = 50
+        freq_max = 80
         raw = filter_raw(raw,freq_min,freq_max)
         #downsample?
         
@@ -796,6 +812,10 @@ if __name__ == '__main__':
         #-- do SSP, one projector
         #raw_pre = ssp_filter(raw)
         
+        if save_raw:
+            raw_clean_path = os.path.join(sample_dir,f'sub-{subject}_task-{task}_preproc_raw.fif')
+            raw.save(raw_clean_path, overwrite=True)
+            print(f"Clean raw saved → {raw_clean_path}")
         
         # --- 2.B visualize sensor alignment and BEM---------------------------------
         if viz_bool:
@@ -806,7 +826,7 @@ if __name__ == '__main__':
                 dig=True,
                 meg=["helmet", "sensors"],
                 subjects_dir=subjects_dir,
-                surfaces="head-dense",
+                surfaces="head",
                 )
             # look at BEM
             plot_bem_kwargs = dict(
@@ -818,27 +838,49 @@ if __name__ == '__main__':
             mne.viz.plot_bem(**plot_bem_kwargs)
             
         # --- 3. Make Epochs and Evokeds --------------------------------------
-        tmin = -0.05  # start of each epoch (200ms before the trigger)
-        tmax = 0.3  # end of each epoch (600ms after the trigger)
-        baseline = (None,0)
-        # can add rejection criteria based on P-to-P signal        
-        # separate out by event ID
-        epochs = mne.Epochs(raw, events, 
+        # Task-specific epoch window
+        if task == "V1Loc":
+            tmin = 0.0
+            tmax = 2.0
+            sfreq = raw.info['sfreq']
+            n_samples = int(round((tmax - tmin) * sfreq))
+            tmax = tmin + (n_samples - 1) / sfreq  # exact sample-aligned tmax
+        elif task == "VWFA":
+            tmin = 0.0
+            tmax = 1.0
+        else:
+            ## TODO: check Tones vs VWFA task specific epoch timing
+            tmin = -0.05
+            tmax = 0.3
+
+        # Single shared Epochs call — all tasks use metadata for condition labels
+        epochs = mne.Epochs(raw, events,
                     tmin=tmin, tmax=tmax,
-                    baseline=baseline,
+                    baseline=None,
                     reject=None,
                     preload=True, metadata=events_df)
-     
-        evokeds = dict()
-        query = "condition == '{}'"
-        for cond in epochs.metadata["condition"].unique():
-            evokeds[str(cond)] = epochs[query.format(cond)].average()
+
+        # Build evokeds — V1Loc groups bin/* and noise/* together; other tasks average per condition
+        if task == "V1Loc":
+            evokeds = {
+                'bin':   epochs[epochs.metadata['condition'].str.startswith('bin/')].average(),
+                'noise': epochs[epochs.metadata['condition'].str.startswith('noise/')].average(),
+            }
+        else:
+            evokeds = dict()
+            query = "condition == '{}'"
+            for cond in epochs.metadata['condition'].unique():
+                evokeds[str(cond)] = epochs[query.format(cond)].average()
+
+        # Shared report and visualization
+        for cond, ev in evokeds.items():
             if save_report:
-                report.add_evokeds(evokeds = evokeds[str(cond)], titles=[cond])
+                report.add_evokeds(evokeds=ev, titles=[cond])
             if viz_bool:
-                ts_args = ts_args = dict(time_unit="s") # can specify limits as ylim=dict(mag=(-400, 400)))
-                topomap_args = dict(time_unit="s") # you can pass other args here, like 'vmin', 'vmax', 'cmap', etc.
-                fig = evokeds[cond].plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args,title=file + ' Task: '+ task + ', Condition: ' + str(cond) )
+                ts_args = dict(time_unit="s")
+                topomap_args = dict(time_unit="s")
+                ev.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args,
+                              title=file + ' Task: ' + task + ', Condition: ' + cond)
         
         # evokeds = [epochs[name].average() for name in event_ids]
         # conds = list(event_ids.keys())
@@ -852,8 +894,13 @@ if __name__ == '__main__':
         #     topomap_args = dict(time_unit="s") 
         #     fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file+ ' Task: '+ task)
         
+        if save_raw:
+            epochs_fif_path = os.path.join(sample_dir,f'sub-{subject}_task-{task}_preproc_epo.fif')
+            epochs.save(epochs_fif_path, overwrite=True)
+            print(f"Clean epochs saved → {epochs_fif_path}")
+
         # --- 4. Create covariance --------------------------------------------
-        cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank=None)
+        cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank='info')
         # cov.save(f'{sample_dir}/V1Loc_empirical_cov.fif')
         # cov = mne.cov.regularize(cov, evoked.info, mag=0.05, grad = 0.05, proj = True, exclude = 'bads')
 
@@ -905,8 +952,13 @@ if __name__ == '__main__':
         # fwd = mne.read_forward_solution(f'{subjects_dir}/{subject}/bem/{subject}-fwd.fif')
         # cov = mne.read_cov(f'{sample_dir}/V1Loc_empirical_cov.fif')
         # stc, inv_op = make_inverse(subjects_dir, subject, fwd, evoked, cov, inverse_method="dSPM")
-        query = "condition == '{}"
-        for cond in epochs.metadata["condition"].unique():
+        for cond in evokeds.keys():
+            # fwd = make_forward(subject, subjects_dir, trans, evokeds[cond],
+            #                  overwrite_fwd=False, overwrite=False,
+            #                  fixed=True, bem_ico=4, src_space="oct7",
+            #                  conductivity=(0.3, 0.006, 0.3),
+            #                  mindist=5, surface='mid',
+            #                  visualize=False, verbose=False)
             inv_operator = mne.minimum_norm.make_inverse_operator(evokeds[cond].info, fwd, cov, loose = 1, depth = None, fixed = False)
             # # --- 7. Apply inverse to evokeds -------------------------------------
             method = "dSPM"  # could choose MNE, sLORETA, or eLORETA instead
@@ -927,7 +979,7 @@ if __name__ == '__main__':
                 surfer_kwargs = dict(
                     hemi="split",
                     subjects_dir=subjects_dir, # clim=dict(kind="value"), lims=[12,20,28]
-                    views=["caudal","medial"], # for visual task
+                    views=["caudal", "medial"], # for visual task
                     initial_time=time_max,
                     time_unit="s",
                     size=(800, 800),
@@ -941,7 +993,7 @@ if __name__ == '__main__':
                 x, _ = sb.GetPosition()
                 sb.SetPosition(x, 0.6)  # vertically between caudal (top) and medial (bottom) rows
                 w, h = sb.GetPosition2()
-                sb.SetPosition2(w, h* 0.5)  # shrink height so top of the color bar doesn't clip
+                sb.SetPosition2(w, h * 0.5)  # shrink height so top of the color bar doesn't clip
                 for renderer in brain.plotter.renderers:
                     for actor in renderer.GetActors2D():
                         if hasattr(actor, 'GetTextProperty'):
@@ -964,8 +1016,5 @@ if __name__ == '__main__':
             report.add_covariance(cov=cov, info=raw.info, title="Covariance")
             report.add_bem(subject=subject, title='BEM')
             report.add_stc(stc=stc, title="STC")
-            report.save(file + "report_raw.html", overwrite=True)
-    
-
-
-
+            report_dir=report_dir
+            report.save(report_dir+ file + "report_raw.html", overwrite=True)
