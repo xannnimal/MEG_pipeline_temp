@@ -159,6 +159,12 @@ def _get_correct_codes(events,special_codes):
         else:
             deleted_Cnds.append(events[i,:])
     ## plot deleted conditions to inspect
+    rejected_dict = _inspect_deleted_codes(deleted_Cnds)
+    event_code_list=np.array(new_events)[:,2]
+    ## now things should look the same as FieldLine
+    return np.array(new_events),np.array(event_code_list)
+
+def _inspect_deleted_codes(deleted_Cnds):
     deleted = np.array(deleted_Cnds)
     deleted[:,1] = deleted[:,1] >> 16
     deleted = deleted[deleted[:,1] != 0]
@@ -173,9 +179,11 @@ def _get_correct_codes(events,special_codes):
     plt.legend()
     plt.show()
     
-    event_code_list=np.array(new_events)[:,2]
-    ## now things should look the same as FieldLine
-    return np.array(new_events),np.array(event_code_list)
+    unique_values, counts = np.unique(col_3, return_counts=True)
+    for i in range(0,len(unique_values)):
+        print("Found "+ str(counts[i])+ " incorrect condition " +str(unique_values[i]))
+    return dict(zip(unique_values, counts))
+
 
 def get_events(raw,task,trigger_chan,modality):
     events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
