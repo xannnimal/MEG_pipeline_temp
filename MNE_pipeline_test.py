@@ -138,29 +138,44 @@ def get_events_fif(raw,task,trigger_chan):
     return events_df, events
 #-----------------------------------------------------------
 # -- events for CTF
-def _get_correct_codes(events):
+def _get_correct_codes(events,special_codes):
     ## check for any accidental 192s
-    for i in range(0,np.shape(events)[0]):
-        if events[i,1]==12582912:
-            events[i-1,2]=13107200
-    ## delete events with error sample in second collumn
-    events = events[events[:, 1] == 0]
-    ## delete events corresponding to any error 512/0 code
-    events = events[events[:, 2] != 512]
-    ## bit shift by 16 to recover normal xDiva codes
+    # for i in range(0,np.shape(events)[0]):
+    #     if events[i,1]==12582912:
+    #         events[i-1,2]=13107200
+    # ## delete events with error sample in second collumn
+    # events = events[events[:, 1] == 0]
+    # ## delete events corresponding to any error 512/0 code
+    # events = events[events[:, 2] != 512]
+    # ## bit shift by 16 to recover normal xDiva codes
+    # event_code_list = events[:, 2]
+    
+    ## bit shift
     event_code_list = events[:, 2]
     for i in range(0,len(event_code_list)):
         event_code_list[i] = event_code_list[i] >> 16  
     events[:, 2]=event_code_list
-    return events,event_code_list
+    
+    #xDiva_Cnds =[1,2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,200]
+    deleted_Cnds = []
+    new_events = []
+    for i in range(0,len(event_code_list)):
+        cnd = event_code_list[i]
+        if events[i,1] == 0 and cnd in special_codes:
+            new_events.append(events[i,:])
+        else:
+            deleted_Cnds.append(events[i,:])
+    
+    event_code_list=np.array(new_events)[:,2]
+    return np.array(new_events),np.array(event_code_list)
 
 def get_events_ctf(raw,task,trigger_chan):
     events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
-    [events,event_code_list] = _get_correct_codes(events)
-
     if task =="VWFA":
-        event_code_updates = np.zeros_like(event_code_list)
         special_codes = np.array([1,2,3,4,5,6,7,8,9])
+        ## get cleaned events
+        [events,event_code_list] = _get_correct_codes(events,special_codes)
+        event_code_updates = np.zeros_like(event_code_list)
         ei = 0
         while ei < len(event_code_list):
             event = event_code_list[ei]
@@ -196,6 +211,10 @@ def get_events_ctf(raw,task,trigger_chan):
         events_df['font'] = [code_dict[c].split('_')[1] for c in events[:, 2]]
         
     if task=="Tones":
+        special_codes = np.array([17,11,12,13,14,15,200])
+        ## get cleaned events
+        [events,event_code_list] = _get_correct_codes(events,special_codes)
+        event_code_updates = np.zeros_like(event_code_list)
         code_dict = {17: '250_Hz', ##broken code
                      11: '500_Hz',
                      12: '1000_Hz',
@@ -880,7 +899,7 @@ if __name__ == '__main__':
                 ts_args = dict(time_unit="s")
                 topomap_args = dict(time_unit="s")
                 ev.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args,
-                              title=file + ' Task: ' + task + ', Condition: ' + cond)
+                              title=subject + ' Task: ' + task + ', Condition: ' + cond)
         
         # evokeds = [epochs[name].average() for name in event_ids]
         # conds = list(event_ids.keys())
@@ -1017,4 +1036,4 @@ if __name__ == '__main__':
             report.add_bem(subject=subject, title='BEM')
             report.add_stc(stc=stc, title="STC")
             report_dir=report_dir
-            report.save(report_dir+ file + "report_raw.html", overwrite=True)
+            report.save(report_dir+ subject + task + "report_raw.html", overwrite=True)
