@@ -139,24 +139,17 @@ def get_events_fif(raw,task,trigger_chan):
 #-----------------------------------------------------------
 # -- events for CTF
 def _get_correct_codes(events,special_codes):
-    ## check for any accidental 192s
-    # for i in range(0,np.shape(events)[0]):
-    #     if events[i,1]==12582912:
-    #         events[i-1,2]=13107200
-    # ## delete events with error sample in second collumn
-    # events = events[events[:, 1] == 0]
-    # ## delete events corresponding to any error 512/0 code
-    # events = events[events[:, 2] != 512]
-    # ## bit shift by 16 to recover normal xDiva codes
-    # event_code_list = events[:, 2]
-    
+    ## check for any accidental 192s, rename correct 200
+    for i in range(0,np.shape(events)[0]):
+        if events[i,1]==12582912:
+            events[i-1,2]=13107200
     ## bit shift
     event_code_list = events[:, 2]
     for i in range(0,len(event_code_list)):
         event_code_list[i] = event_code_list[i] >> 16  
     events[:, 2]=event_code_list
     
-    #xDiva_Cnds =[1,2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,200]
+    ## remove extra unexpected conditions
     deleted_Cnds = []
     new_events = []
     for i in range(0,len(event_code_list)):
@@ -167,15 +160,18 @@ def _get_correct_codes(events,special_codes):
             deleted_Cnds.append(events[i,:])
     
     event_code_list=np.array(new_events)[:,2]
+    ## now things should look the same as FieldLine
     return np.array(new_events),np.array(event_code_list)
 
-def get_events_ctf(raw,task,trigger_chan):
+def get_events(raw,task,trigger_chan,modality):
     events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
     if task =="VWFA":
-        special_codes = np.array([1,2,3,4,5,6,7,8,9])
+        xDiva_codes = np.array([1,2,3,4,5,6,7,8,9,200])
         ## get cleaned events
-        [events,event_code_list] = _get_correct_codes(events,special_codes)
+        if modality=='CTF':
+            [events,event_code_list] = _get_correct_codes(events,xDiva_codes)
         event_code_updates = np.zeros_like(event_code_list)
+        special_codes=np.array([1,2,3,4,5,6,7,8,9])
         ei = 0
         while ei < len(event_code_list):
             event = event_code_list[ei]
@@ -213,7 +209,8 @@ def get_events_ctf(raw,task,trigger_chan):
     if task=="Tones":
         special_codes = np.array([17,11,12,13,14,15,200])
         ## get cleaned events
-        [events,event_code_list] = _get_correct_codes(events,special_codes)
+        if modality=='CTF':
+            [events,event_code_list] = _get_correct_codes(events,special_codes)
         event_code_updates = np.zeros_like(event_code_list)
         code_dict = {17: '250_Hz', ##broken code
                      11: '500_Hz',
@@ -230,8 +227,12 @@ def get_events_ctf(raw,task,trigger_chan):
         events_df['units'] = [code_dict[c].split('_')[1] for c in events[:, 2]]
            
     if task == "V1Loc":
-        TRIAL_ID = 1048576   # trial-onset trigger (16 * 65536, equivalent to EEG DIN4)
-        BIN_ID   = 13107200  # bin-onset trigger   (200 * 65536, equivalent to EEG DIN5)
+        if modality=='CTF':
+            TRIAL_ID = 1048576   # trial-onset trigger (16 * 65536, equivalent to EEG DIN4)
+            BIN_ID   = 13107200  # bin-onset trigger   (200 * 65536, equivalent to EEG DIN5)
+        else:
+            TRIAL_ID = 16   # trial-onset trigger (equivalent to EEG DIN4)
+            BIN_ID   = 200  # bin-onset trigger   (equivalent to EEG DIN5)
 
         trial_samples = events[events[:, 2] == TRIAL_ID, 0]
         bin_samples   = events[events[:, 2] == BIN_ID,   0]
@@ -751,43 +752,52 @@ if __name__ == '__main__':
     ## 1. Load and setup data
     for file in raw_files:
         # --- 1. Load data, find events ---------------------------------------
-        if np.size(file) == 1 and file.endswith(".fif"):
-            ## load OPM, find events, do preprocessing
-            ## specify trigger 
-            trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
+        # if np.size(file) == 1 and modality=='OPM':
+        #     ## load OPM, find events, do preprocessing
+        #     ## specify trigger 
+        #     trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
             
-            #setup raw, info, events, and specify task type
-            raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
-            [events_df,events] = get_events_fif(raw,task,trigger_chan)
-            info = raw.info
-            picks = 'mag'
-            reject_criteria = dict(mag=4000e-15)  # 4000fT
+        #     #setup raw, info, events, and specify task type
+        #     raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
+        #     [events_df,events] = get_events_fif(raw,task,trigger_chan)
+        #     info = raw.info
+        #     picks = 'mag'
+        #     reject_criteria = dict(mag=4000e-15)  # 4000fT
             
-        ## -- check for datasets that need concatenating --------------------------
-        elif task == 'VWFA' and np.size(file) > 1:
-            if file[0].endswith(".ds"):
-                trigger_chan='STIM'
-                raw = read_raw_ctf(os.path.join(sample_dir,file[0]), preload=True)
-                mne.io.concatenate_raws([raw,read_raw_ctf(os.path.join(sample_dir,file[1]), preload=True)], on_mismatch="ignore")
-                [events_df,events] = get_events_ctf(raw,task,trigger_chan)
-                # always do this preprocessing, reccommended by Dylan @ UCSF
-                raw.apply_gradient_compensation(3)
-                info = raw.info
-                picks = 'grad'
-                reject_criteria = dict(grad=4000e-13) #4000 fT/cm
-                
-        elif file.endswith(".ds"):  
+        ## -- get Raw, check for datasets that need concatenating --------------------------
+        if task == 'VWFA' and modality=='CTF':
             trigger_chan='STIM'
-            raw = read_raw_ctf(os.path.join(sample_dir,file), preload=True)
-            [events_df,events] = get_events_ctf(raw,task,trigger_chan)
+            raw = read_raw_ctf(os.path.join(sample_dir,file[0]), preload=True)
+            mne.io.concatenate_raws([raw,read_raw_ctf(os.path.join(sample_dir,file[1]), preload=True)], on_mismatch="ignore")
+            #[events_df,events] = get_events_ctf(raw,task,trigger_chan)
             # always do this preprocessing, reccommended by Dylan @ UCSF
             raw.apply_gradient_compensation(3)
             info = raw.info
             picks = 'grad'
             reject_criteria = dict(grad=4000e-13) #4000 fT/cm
+                
+        elif modality=='CTF':  
+            trigger_chan='STIM'
+            raw = read_raw_ctf(os.path.join(sample_dir,file), preload=True)
+            #[events_df,events] = get_events_ctf(raw,task,trigger_chan)
+            # always do this preprocessing, reccommended by Dylan @ UCSF
+            raw.apply_gradient_compensation(3)
+            info = raw.info
+            picks = 'grad'
+            reject_criteria = dict(grad=4000e-13) #4000 fT/cm
+            
+        elif modality == 'OPM':
+            trigger_chan = 'di2'
+            raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
+            #[events_df,events] = get_events_fif(raw,task,trigger_chan)
+            info = raw.info
+            picks = 'mag'
+            reject_criteria = dict(mag=4000e-15)  # 4000fT
         else:
             print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
         
+        ## -- Load and Setup Events
+        [events_df,events] = get_events(raw,task,trigger_chan,modality)
         
         # --- 1.B Look at Events -----------------------------------------------
         ## save events
