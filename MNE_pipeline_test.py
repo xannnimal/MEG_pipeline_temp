@@ -43,99 +43,99 @@ warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
 # --- FUNCTIONS ---------------------------------------------------------------
 # --- Load, find events, and rename/order them --------------------------------
-def get_events_fif(raw,task,trigger_chan):
-    events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
-    if task=="VWFA":
-        event_code_list = events[:, 2]
-        event_code_updates = np.zeros_like(event_code_list)
-        special_codes = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9])
-        ei = 0
-        while ei < len(event_code_list):
-            event = event_code_list[ei]
-            if event in special_codes:
-                event_code_updates[ei+1:ei+5] = event
-                event_code_updates[ei] = 201  # code for what was the condition label
-                ei += 4  # skip next 4 positions 
-            else:
-                ei += 1  # just advance by 1 if no match
-        events[:, 2] = event_code_updates
-        # get just the code part
-        trigger_codes = events[:, 2]
-        blocks = trigger_codes.reshape(-1, 5)
-        blocks_rearranged = blocks[:, [1, 2, 3, 4, 0]]
-        result = blocks_rearranged.flatten()
-        events[:, 2] = result
-        # make event codes interpretable
-        code_dict = {1: 'highFreqWords_Sloan',
-                     2: 'pseudowords_Sloan',
-                     3: 'consonants_Sloan',
-                     4: 'falseFontsHigh_Sloan',
-                     5: 'highFreqWords_Courier',
-                     6: 'pseudowords_Courier',
-                     7: 'consonants_Courier',
-                     8: 'falseFontsHigh_Courier',
-                     9: 'background_',
-                     201: 'stimulusoffset_'
-                     }
+# def get_events_fif(raw,task,trigger_chan):
+#     events = mne.find_events(raw, stim_channel=trigger_chan, shortest_event=1)
+#     if task=="VWFA":
+#         event_code_list = events[:, 2]
+#         event_code_updates = np.zeros_like(event_code_list)
+#         special_codes = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9])
+#         ei = 0
+#         while ei < len(event_code_list):
+#             event = event_code_list[ei]
+#             if event in special_codes:
+#                 event_code_updates[ei+1:ei+5] = event
+#                 event_code_updates[ei] = 201  # code for what was the condition label
+#                 ei += 4  # skip next 4 positions 
+#             else:
+#                 ei += 1  # just advance by 1 if no match
+#         events[:, 2] = event_code_updates
+#         # get just the code part
+#         trigger_codes = events[:, 2]
+#         blocks = trigger_codes.reshape(-1, 5)
+#         blocks_rearranged = blocks[:, [1, 2, 3, 4, 0]]
+#         result = blocks_rearranged.flatten()
+#         events[:, 2] = result
+#         # make event codes interpretable
+#         code_dict = {1: 'highFreqWords_Sloan',
+#                      2: 'pseudowords_Sloan',
+#                      3: 'consonants_Sloan',
+#                      4: 'falseFontsHigh_Sloan',
+#                      5: 'highFreqWords_Courier',
+#                      6: 'pseudowords_Courier',
+#                      7: 'consonants_Courier',
+#                      8: 'falseFontsHigh_Courier',
+#                      9: 'background_',
+#                      201: 'stimulusoffset_'
+#                      }
         
-        # make into a nice pandas dataframe
-        events_df = pd.DataFrame()
-        events_df['code'] = events[:, 2]
-        events_df['condition'] = [code_dict[c].split('_')[0] for c in events[:, 2]]
-        events_df['font'] = [code_dict[c].split('_')[1] for c in events[:, 2]]
+#         # make into a nice pandas dataframe
+#         events_df = pd.DataFrame()
+#         events_df['code'] = events[:, 2]
+#         events_df['condition'] = [code_dict[c].split('_')[0] for c in events[:, 2]]
+#         events_df['font'] = [code_dict[c].split('_')[1] for c in events[:, 2]]
         
-    if task=="Tones":
-        code_dict = {10: '250_Hz',
-                     11: '500_Hz',
-                     12: '1000_Hz',
-                     13: '2000_Hz',
-                     14: '4000_Hz',
-                     15: 'background_',
-                     200: 'stimulusoffset_'
-                     }
-        # make into a nice pandas dataframe
-        events_df = pd.DataFrame()
-        events_df['code'] = events[:, 2]
-        events_df['condition'] = [code_dict[c].split('_')[0] for c in events[:, 2]]
-        events_df['units'] = [code_dict[c].split('_')[1] for c in events[:, 2]]
+#     if task=="Tones":
+#         code_dict = {10: '250_Hz',
+#                      11: '500_Hz',
+#                      12: '1000_Hz',
+#                      13: '2000_Hz',
+#                      14: '4000_Hz',
+#                      15: 'background_',
+#                      200: 'stimulusoffset_'
+#                      }
+#         # make into a nice pandas dataframe
+#         events_df = pd.DataFrame()
+#         events_df['code'] = events[:, 2]
+#         events_df['condition'] = [code_dict[c].split('_')[0] for c in events[:, 2]]
+#         events_df['units'] = [code_dict[c].split('_')[1] for c in events[:, 2]]
         
-    if task == "V1Loc":
-        TRIAL_ID = 16   # trial-onset trigger (equivalent to EEG DIN4)
-        BIN_ID   = 200  # bin-onset trigger   (equivalent to EEG DIN5)
+#     if task == "V1Loc":
+#         TRIAL_ID = 16   # trial-onset trigger (equivalent to EEG DIN4)
+#         BIN_ID   = 200  # bin-onset trigger   (equivalent to EEG DIN5)
 
-        trial_samples = events[events[:, 2] == TRIAL_ID, 0]
-        bin_samples   = events[events[:, 2] == BIN_ID,   0]
+#         trial_samples = events[events[:, 2] == TRIAL_ID, 0]
+#         bin_samples   = events[events[:, 2] == BIN_ID,   0]
 
-        event_id = {
-            'bin/0': 0, 'bin/1': 1, 'bin/2': 2, 'bin/3': 3, 'bin/4': 4,
-            'noise/prelude':  5,
-            'noise/postlude': 6,
-        }
-        label_map = {v: k for k, v in event_id.items()}
+#         event_id = {
+#             'bin/0': 0, 'bin/1': 1, 'bin/2': 2, 'bin/3': 3, 'bin/4': 4,
+#             'noise/prelude':  5,
+#             'noise/postlude': 6,
+#         }
+#         label_map = {v: k for k, v in event_id.items()}
 
-        all_events = []
-        for i, trial_start in enumerate(trial_samples):
-            trial_end = trial_samples[i + 1] if i + 1 < len(trial_samples) else np.inf
-            bins_in_trial = bin_samples[(bin_samples >= trial_start) & (bin_samples < trial_end)]
+#         all_events = []
+#         for i, trial_start in enumerate(trial_samples):
+#             trial_end = trial_samples[i + 1] if i + 1 < len(trial_samples) else np.inf
+#             bins_in_trial = bin_samples[(bin_samples >= trial_start) & (bin_samples < trial_end)]
 
-            for pos, s in enumerate(bins_in_trial[:5]):
-                all_events.append([s, 0, pos])
+#             for pos, s in enumerate(bins_in_trial[:5]):
+#                 all_events.append([s, 0, pos])
 
-            if len(bins_in_trial) >= 1:
-                all_events.append([trial_start, 0, 5])   # prelude anchored at trial trigger
+#             if len(bins_in_trial) >= 1:
+#                 all_events.append([trial_start, 0, 5])   # prelude anchored at trial trigger
 
-            if len(bins_in_trial) >= 6:
-                all_events.append([bins_in_trial[5], 0, 6])  # postlude anchored at bin[5]
+#             if len(bins_in_trial) >= 6:
+#                 all_events.append([bins_in_trial[5], 0, 6])  # postlude anchored at bin[5]
 
-        all_events = np.array(all_events, dtype=int)
-        all_events = all_events[np.argsort(all_events[:, 0])]
-        events = all_events
+#         all_events = np.array(all_events, dtype=int)
+#         all_events = all_events[np.argsort(all_events[:, 0])]
+#         events = all_events
 
-        events_df = pd.DataFrame({'condition': [label_map[e[2]] for e in all_events]})
+#         events_df = pd.DataFrame({'condition': [label_map[e[2]] for e in all_events]})
 
-    else:
-        print("no valid events detected, please double check data file name")
-    return events_df, events
+#     else:
+#         print("no valid events detected, please double check data file name")
+#     return events_df, events
 #-----------------------------------------------------------
 # -- events for CTF
 def _get_correct_codes(events,special_codes):
@@ -158,6 +158,20 @@ def _get_correct_codes(events,special_codes):
             new_events.append(events[i,:])
         else:
             deleted_Cnds.append(events[i,:])
+    ## plot deleted conditions to inspect
+    deleted = np.array(deleted_Cnds)
+    deleted[:,1] = deleted[:,1] >> 16
+    deleted = deleted[deleted[:,1] != 0]
+    col_1 = np.array(deleted_Cnds)[:,0]
+    col_3 = np.array(deleted_Cnds)[:,2]
+    plt.figure()
+    plt.scatter(deleted[:,0],deleted[:,1], color='blue', label='wrong triggers')
+    plt.scatter(col_1,col_3, color='red', label='wrong sample occurance')
+    plt.xlabel('Sample number of occurance')
+    plt.ylabel('Registered Trigger Value (after bit shifting)')
+    plt.title('Log of Deleted Triggers')
+    plt.legend()
+    plt.show()
     
     event_code_list=np.array(new_events)[:,2]
     ## now things should look the same as FieldLine
@@ -170,6 +184,8 @@ def get_events(raw,task,trigger_chan,modality):
         ## get cleaned events
         if modality=='CTF':
             [events,event_code_list] = _get_correct_codes(events,xDiva_codes)
+        else:
+            event_code_list = events[:, 2]
         event_code_updates = np.zeros_like(event_code_list)
         special_codes=np.array([1,2,3,4,5,6,7,8,9])
         ei = 0
@@ -211,15 +227,25 @@ def get_events(raw,task,trigger_chan,modality):
         ## get cleaned events
         if modality=='CTF':
             [events,event_code_list] = _get_correct_codes(events,special_codes)
+            code_dict = {17: '250_Hz', ##broken code
+                         11: '500_Hz',
+                         12: '1000_Hz',
+                         13: '2000_Hz',
+                         14: '4000_Hz',
+                         15: 'background_',
+                         200: 'stimulusoffset_'
+                         }
+        else:
+            event_code_list = events[:, 2]
+            code_dict = {10: '250_Hz', ##broken code
+                         11: '500_Hz',
+                         12: '1000_Hz',
+                         13: '2000_Hz',
+                         14: '4000_Hz',
+                         15: 'background_',
+                         200: 'stimulusoffset_'
+                         }
         event_code_updates = np.zeros_like(event_code_list)
-        code_dict = {17: '250_Hz', ##broken code
-                     11: '500_Hz',
-                     12: '1000_Hz',
-                     13: '2000_Hz',
-                     14: '4000_Hz',
-                     15: 'background_',
-                     200: 'stimulusoffset_'
-                     }
         # make into a nice pandas dataframe
         events_df = pd.DataFrame()
         events_df['code'] = events[:, 2]
