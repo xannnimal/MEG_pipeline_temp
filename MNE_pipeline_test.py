@@ -29,6 +29,7 @@ import numpy as np
 import nibabel as nib
 from pathlib import Path
 import matplotlib.pyplot as plt
+import sklearn
 
 import mne
 from mne.io import read_raw_ctf
@@ -42,9 +43,7 @@ warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
 
 # --- FUNCTIONS ---------------------------------------------------------------
-## Load data, set up events
-#-----------------------------------------------------------
-# -- events for CTF
+# --- Load, find events, and rename/order them --------------------------------
 def _get_correct_codes(events,special_codes):
     ## check for any accidental 192s, rename correct 200
     for i in range(0,np.shape(events)[0]):
@@ -210,26 +209,104 @@ def get_events(raw,task,trigger_chan,modality):
         print("no valid events detected, please double check data file name")
     return events_df, events
         
+        
 ## -- Preprocessing Functions -------------------------------------------------
 def filter_raw(raw,freq_min,freq_max):
-    ## TODO
     raw.load_data().filter(l_freq=freq_min, h_freq=None)
     raw.filter(l_freq=None, h_freq=freq_max)
     meg_picks = mne.pick_types(raw.info, meg=True)
     raw.notch_filter(freqs=60, picks=meg_picks)
     return raw
-    
-def ssp_filter(raw):
-    # SSP projector
-    proj = mne.compute_proj_raw(raw, start=0, stop=None, duration=1, n_grad=0, n_mag=2, n_eeg=0, reject=None, flat=None, n_jobs=None, meg='separate', verbose=None)
-    raw_proj = raw.copy().add_proj(proj)
-    return raw_proj
 
-def sss_prepros(raw,Lin):
-    """do traditional SSS with origin 0 in MEG frame"""
+  # Fosters --------------------------------------------------------------------
+def _do_inverse(raw,N,ntype):
+    """
+    Parameters
+    ----------
+    raw : mne.raw structure
+        full raw meg file, ex. "fif", from recording with raw.info["bads"] indicated
+    N : 2D square matrix, (number of sensors) X (number of sensors)
+        Sensor noise covariance matrix, calculated using empircial covariance
+        implemented in mne.compute_raw_covariance
+
+    Returns
+    -------
+    data_fosters : 2D matrix, (number of sensors) X (time)
+        Matrix containing data corresponding to each MEG channel over time after
+        reconstruction with Fosters Inverse preprocessing
+    """
+    ## extract raw data matrix from MEG channels
+    phi_0 = raw.get_data(picks='meg')
+    ## calculate SSS matrix S and multiple moments with reccomended params
+    [S, pS, reg_moments, n_use_in]=mne.preprocessing.compute_maxwell_basis(raw.info, origin=(0.,0.,0.), int_order=8, ext_order=3, calibration=None, coord_frame='meg', regularize=None, ignore_ref=True, bad_condition='error', mag_scale=100.0, extended_proj=(), verbose=None)
+    ## setup Foster's Inverse- calculate Matrix B and vector b
+    if ntype=='E': #only use internal S
+        S = S[:, :n_use_in]
+        XN = pS[:n_use_in,:] @ phi_0
+    if ntype =='OTP':
+        XN = pS @ phi_0
+    alpha = np.transpose(XN)
+    alpha_cov_norm = np.cov(XN)
+    S_star = np.transpose(np.conj(S))
+    first = np.linalg.pinv(S@alpha_cov_norm@S_star +N)
+    B = alpha_cov_norm @ S_star @ first
+    m_alpha = np.transpose(np.mean(alpha,0))
+    b = m_alpha - B@S@m_alpha
+    x_bar = np.zeros_like(XN)
+    
+    ## calculate Foster's Inverse estimate of multipole moments
+    for i in range(0,np.shape(phi_0)[1]):
+        x_bar[:,i]=B@phi_0[:,i] + b
+    
+    ## use new estimate to reconstruct internal data
+    data_fosters = np.real(S[:, :n_use_in]@x_bar[:n_use_in,:])
+    return data_fosters
+    
+def fosters_inverse(raw,ntype):
+    """
+    Parameters
+    ----------
+    raw : mne.raw structure
+        full raw meg file, ex. "fif", from recording with raw.info["bads"] indicated
+    
+    Returns
+    -------
+    raw_fos : mne.raw structure
+        raw strucutre with the MEG data updated with the Fosters Inverse 
+        preprocessed data, raw.info structure updated to indicate some type of
+        Maxwell Filtering/SSS preprocessing has occured. Channels marked "bad" 
+        are dropped
+    """
+    ## calculate sensor noise covariance
+    if ntype=='E':
+        #TODO: is this the best time period to calculate N?
+        N = mne.compute_raw_covariance(raw,tmin=0,tmax=10,rank="info",method='empirical')["data"]
+    if ntype =='OTP':
+        ## calculate N using OTP method
+        raw_otp = mne.preprocessing.oversampled_temporal_projection(raw, duration = 100)
+        diff = raw.get_data(picks='meg') - raw_otp.get_data(picks='meg')
+        del raw_otp
+        N = sklearn.covariance.empirical_covariance(np.transpose(diff))  
+    ## create data strcutre, indicates in "info" that some preprocessing akin to SSS has happened
+    raw_fos = mne.preprocessing.maxwell_filter(raw, origin=(0.,0.,0.), int_order=8, ext_order=3, calibration=None, coord_frame='meg', regularize='in', ignore_ref=True, bad_condition='error', mag_scale=100.0, extended_proj=(), verbose=None)  # just to get the info to indicate some Maxwell filtering was done etc.
     assert raw.info["bads"] == [] # double check bads were dropped
-    raw_sss = mne.preprocessing.maxwell_filter(raw, origin=(0., 0., 0.), int_order=Lin, ext_order=3, calibration=None, coord_frame='meg', regularize='in', ignore_ref=True, bad_condition='error', mag_scale=100.0, extended_proj=(), verbose=None)  
-    return raw_sss
+    
+    ## Do foster's inverse!
+    foster_sss_data= _do_inverse(raw, N, ntype)
+    
+    ## isolate MEG channels 
+    meg_picks = mne.pick_types(raw.info, meg=True)
+    ## put new Foster's inverse recon data into "raw" structure
+    raw_fos._data[meg_picks] = foster_sss_data
+    ## cleanup
+    del foster_sss_data
+    return raw_fos
+    
+# def sss_prepros(raw,Lin):
+#     """do traditional SSS with origin 0 in MEG frame"""
+#     assert raw.info["bads"] == [] # double check bads were dropped
+#     raw_sss = mne.preprocessing.maxwell_filter(raw, origin=(0., 0., 0.), int_order=Lin, ext_order=3, calibration=None, coord_frame='meg', regularize='in', ignore_ref=True, bad_condition='error', mag_scale=100.0, extended_proj=(), verbose=None)  
+#     return raw_sss
 
 def _eog_artifact(raw):
     """TODO: https://mne.tools/stable/auto_tutorials/preprocessing/20_rejecting_bad_data.html """
@@ -686,54 +763,40 @@ def plot3Dhelmetwithhpi(raw,ax,showLabels=True,showDevice=True,thetitle=''):
 # --- Main (example usage) ----------------------------------------------------
 if __name__ == '__main__':
    # --- Load user-specific config (copy config_template.py -> config.py and fill in your paths)
-    from config_XM import sample_dir, raw_files, trans, subjects_dir, subject, task, modality, viz_bool, sss_bool, save_report, report_dir, save_raw
+    from config import sample_dir, raw_files, trans, subjects_dir, subject, task, modality, viz_bool, sss_bool, save_report, report_dir, save_raw
     ## if getting a FreeSurfer error, set this variable to the location of your subjects anatomy
     # os.environ["SUBJECTS_DIR"] = subjects_dir
     
 
     ## 1. Load and setup data
     for file in raw_files:
-        # --- 1. Load data, find events ---------------------------------------
-        # if np.size(file) == 1 and modality=='OPM':
-        #     ## load OPM, find events, do preprocessing
-        #     ## specify trigger 
-        #     trigger_chan = 'di2' # should always be 'di2' for FieldLine but could be 'di1'
-            
-        #     #setup raw, info, events, and specify task type
-        #     raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
-        #     [events_df,events] = get_events_fif(raw,task,trigger_chan)
-        #     info = raw.info
-        #     picks = 'mag'
-        #     reject_criteria = dict(mag=4000e-15)  # 4000fT
-            
         ## -- get Raw, check for datasets that need concatenating --------------------------
+        # check for special cases before updating CTF data collection time June2026
         if task == 'VWFA' and modality=='CTF' and (subject=='S001' or subject=='S009'):
             trigger_chan='STIM'
             raw = read_raw_ctf(os.path.join(sample_dir,file[0]), preload=True)
             mne.io.concatenate_raws([raw,read_raw_ctf(os.path.join(sample_dir,file[1]), preload=True)], on_mismatch="ignore")
-            #[events_df,events] = get_events_ctf(raw,task,trigger_chan)
             # always do this preprocessing, reccommended by Dylan @ UCSF
             raw.apply_gradient_compensation(3)
             info = raw.info
-            picks = 'grad'
+            picks = mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads')
             reject_criteria = dict(grad=4000e-13) #4000 fT/cm
                 
         elif modality=='CTF':  
             trigger_chan='STIM'
             raw = read_raw_ctf(os.path.join(sample_dir,file), preload=True)
-            #[events_df,events] = get_events_ctf(raw,task,trigger_chan)
-            # always do this preprocessing, reccommended by Dylan @ UCSF
             raw.apply_gradient_compensation(3)
-            info = raw.info
-            picks = 'grad'
+            #info = raw.info
+            info = mne.pick_info(raw.info, mne.pick_types(raw.info, meg=True, eeg=False, ref_meg=False))
+            picks = mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads')
             reject_criteria = dict(grad=4000e-13) #4000 fT/cm
             
         elif modality == 'OPM':
             trigger_chan = 'di2'
             raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
-            #[events_df,events] = get_events_fif(raw,task,trigger_chan)
             info = raw.info
-            picks = 'mag'
+            picks='mag'
+            #picks = mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads')
             reject_criteria = dict(mag=4000e-15)  # 4000fT
         else:
             print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
@@ -771,14 +834,14 @@ if __name__ == '__main__':
         #-- Notch filter 60Hz, low pass and high pass
         ## TODO split freq by task
         freq_min = 0.5
-        freq_max = 80
+        freq_max = 50
         raw = filter_raw(raw,freq_min,freq_max)
         #downsample?
         
         #-- Do SSS
-        if sss_bool:
-            Lin=8
-            raw = sss_prepros(raw,Lin)
+        if sss_bool and modality == 'OPM':
+            ## using Epirical noise covariance method
+            raw = fosters_inverse(raw,'E')
         
         #-- do SSP, one projector
         #raw_pre = ssp_filter(raw)
@@ -828,6 +891,7 @@ if __name__ == '__main__':
         epochs = mne.Epochs(raw, events,
                     tmin=tmin, tmax=tmax,
                     baseline=None,
+                    # picks=picks,
                     reject=None,
                     preload=True, metadata=events_df)
 
@@ -851,7 +915,7 @@ if __name__ == '__main__':
                 ts_args = dict(time_unit="s")
                 topomap_args = dict(time_unit="s")
                 ev.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args,
-                              title=subject + ' Task: ' + task + ', Condition: ' + cond)
+                              title=file + ' Task: ' + task + ', Condition: ' + cond)
         
         # evokeds = [epochs[name].average() for name in event_ids]
         # conds = list(event_ids.keys())
@@ -988,4 +1052,4 @@ if __name__ == '__main__':
             report.add_bem(subject=subject, title='BEM')
             report.add_stc(stc=stc, title="STC")
             report_dir=report_dir
-            report.save(report_dir+ subject + task + "report_raw.html", overwrite=True)
+            report.save(report_dir+ file + "report_raw.html", overwrite=True)
