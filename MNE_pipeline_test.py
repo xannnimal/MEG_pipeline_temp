@@ -37,6 +37,12 @@ from mne import Covariance
 from mne.minimum_norm import (make_inverse_operator, write_inverse_operator, apply_inverse)
 from mne.beamformer import make_lcmv, apply_lcmv
 from mne.surface import read_surface
+
+# import functions for Foster's and mSSS
+from utils.fit_spheres_to_mri import fit_spheres_to_mri
+from utils.run_fosters_mSSS import apply_preprocessing
+
+
 # This takes care some numpy dependency issues...not required depending on the numpy version
 warnings.filterwarnings("ignore", message="numpy.dtype size changed")
 warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
@@ -44,7 +50,7 @@ warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
 # --- FUNCTIONS ---------------------------------------------------------------
 # --- Load, find events, and rename/order them --------------------------------
-def _get_correct_codes(events,special_codes):
+def _get_correct_codes(events,special_codes,task):
     ## check for any accidental 192s, rename correct 200
     for i in range(0,np.shape(events)[0]):
         if events[i,1]==12582912:
@@ -68,6 +74,51 @@ def _get_correct_codes(events,special_codes):
     rejected_dict = _inspect_deleted_codes(deleted_Cnds)
     del rejected_dict
     event_code_list=np.array(new_events)[:,2]
+    
+    ## check for blocks where there is not the right # of end epochs
+    #find indicies of all trigger codes
+    code_indices = [i for i, num in enumerate(event_code_list) if num !=200]
+    delete_mask = np.zeros(len(event_code_list), dtype=bool)
+    # Iterate through consecutive pairs of 1s in reverse
+    block_count=0
+    if task=='VWFA':
+        for i in range(len(code_indices) - 1):
+            idx1 = code_indices[i]
+            idx2 = code_indices[i+1]
+            # Calculate how many EndEpochs are between the two events
+            num_values = idx2 - idx1
+            # If the gap size is not correct, mark for deletion
+            if num_values != 5: # for VWFA
+                delete_mask[idx1 : idx2] = True
+                block_count+=1
+        # Delete marked indices and return the new array
+        event_code_list = np.delete(event_code_list, np.where(delete_mask)[0])
+        new_events = np.delete(new_events, np.where(delete_mask),axis=0)
+        
+        ## check for chopped off blocks at the end of file
+        if len(event_code_list)%5 !=0: #for VWFA
+            numex = len(event_code_list)%5
+            event_code_list = event_code_list[:-numex]
+            new_events=new_events[:-numex]
+            block_count+=1
+        print(str(block_count)+" blocks were deleted for incorrect number of EndEpoch codes")
+    if task=='Tones':
+        for i in range(len(code_indices) - 1):
+            idx1 = code_indices[i]
+            idx2 = code_indices[i+1]
+            num_values = idx2 - idx1
+            if num_values != 2: # for VWFA
+                delete_mask[idx1 : idx2] = True
+                block_count+=1
+        event_code_list = np.delete(event_code_list, np.where(delete_mask)[0])
+        new_events = np.delete(new_events, np.where(delete_mask),axis=0)
+        if len(event_code_list)%2 !=0: 
+            numex = len(event_code_list)%2
+            event_code_list = event_code_list[:-numex]
+            new_events=new_events[:-numex]
+            block_count+=1
+        print(str(block_count)+" blocks were deleted for incorrect number of EndEpoch codes")
+            
     ## now things should look the same as FieldLine
     return np.array(new_events),np.array(event_code_list)
 
@@ -77,18 +128,23 @@ def _inspect_deleted_codes(deleted_Cnds):
     deleted = deleted[deleted[:,1] != 0]
     col_1 = np.array(deleted_Cnds)[:,0]
     col_3 = np.array(deleted_Cnds)[:,2]
-    plt.figure()
-    plt.scatter(deleted[:,0],deleted[:,1], color='blue', label='wrong triggers')
-    plt.scatter(col_1,col_3, color='red', label='wrong sample occurance')
-    plt.xlabel('Sample number of occurance')
-    plt.ylabel('Registered Trigger Value (after bit shifting)')
-    plt.title('Log of Deleted Triggers')
-    plt.legend()
-    plt.show()
-    
+    fig, ax = plt.subplots()
+    ax.scatter(deleted[:,0],deleted[:,1], color='blue', label='wrong triggers')
+    ax.scatter(col_1,col_3, color='red', label='wrong sample occurance')
+    ax.set_xlabel('Sample number of occurance')
+    ax.set_ylabel('Registered Trigger Value (after bit shifting)')
+    ax.set_title('Log of Deleted Triggers')
+    ax.legend()
+    fig.show()
+    report.add_figure(
+        fig=fig,
+        title="Log of Dropped Triggers",
+        caption="These CTF detected triggers have been auto-dropped because they appeared at the wrong sample time, or are a trigger value that does not exisit in the stimulus session",
+        image_format='PNG')
     unique_values, counts = np.unique(col_3, return_counts=True)
     for i in range(0,len(unique_values)):
         print("Found "+ str(counts[i])+ " incorrect condition " +str(unique_values[i]))
+    
     return dict(zip(unique_values, counts))
 
 
@@ -98,7 +154,7 @@ def get_events(raw,task,trigger_chan,modality):
         xDiva_codes = np.array([1,2,3,4,5,6,7,8,9,200])
         ## get cleaned events
         if modality=='CTF':
-            [events,event_code_list] = _get_correct_codes(events,xDiva_codes)
+            [events,event_code_list] = _get_correct_codes(events,xDiva_codes,task)
         else:
             event_code_list = events[:, 2]
         event_code_updates = np.zeros_like(event_code_list)
@@ -108,7 +164,7 @@ def get_events(raw,task,trigger_chan,modality):
             event = event_code_list[ei]
             if event in special_codes:
                 event_code_updates[ei+1:ei+5] = event
-                event_code_updates[ei] = 201  # code for what was the condition label
+                event_code_updates[ei] = 200 # code for what was the condition label
                 ei += 4  # skip next 4 positions 
             else:
                 ei += 1  # just advance by 1 if no match
@@ -129,7 +185,7 @@ def get_events(raw,task,trigger_chan,modality):
                      7: 'consonants_Courier',
                      8: 'falseFontsHigh_Courier',
                      9: 'background_',
-                     201 : 'stimulusoffset_'
+                     200 : 'stimulusoffset_'
                      }
         # make into a nice pandas dataframe
         events_df = pd.DataFrame()
@@ -141,7 +197,7 @@ def get_events(raw,task,trigger_chan,modality):
         special_codes = np.array([17,11,12,13,14,15,200])
         ## get cleaned events
         if modality=='CTF':
-            [events,event_code_list] = _get_correct_codes(events,special_codes)
+            [events,event_code_list] = _get_correct_codes(events,special_codes,task)
             code_dict = {17: '250_Hz', ##broken code
                          11: '500_Hz',
                          12: '1000_Hz',
@@ -160,7 +216,9 @@ def get_events(raw,task,trigger_chan,modality):
                          15: 'background_',
                          200: 'stimulusoffset_'
                          }
-        event_code_updates = np.zeros_like(event_code_list)
+        if np.shape(events)[0]!=1440:
+            print("CAUTION: Incorrect number of events")
+        
         # make into a nice pandas dataframe
         events_df = pd.DataFrame()
         events_df['code'] = events[:, 2]
@@ -236,7 +294,7 @@ def _do_inverse(raw,N,ntype):
         reconstruction with Fosters Inverse preprocessing
     """
     ## extract raw data matrix from MEG channels
-    phi_0 = raw.get_data(picks='meg')
+    phi_0 = raw.get_data(picks='mag')
     ## calculate SSS matrix S and multiple moments with reccomended params
     [S, pS, reg_moments, n_use_in]=mne.preprocessing.compute_maxwell_basis(raw.info, origin=(0.,0.,0.), int_order=8, ext_order=3, calibration=None, coord_frame='meg', regularize=None, ignore_ref=True, bad_condition='error', mag_scale=100.0, extended_proj=(), verbose=None)
     ## setup Foster's Inverse- calculate Matrix B and vector b
@@ -262,7 +320,7 @@ def _do_inverse(raw,N,ntype):
     data_fosters = np.real(S[:, :n_use_in]@x_bar[:n_use_in,:])
     return data_fosters
     
-def fosters_inverse(raw,ntype):
+def fosters_inverse(raw,Ntmax,ntype):
     """
     Parameters
     ----------
@@ -280,7 +338,7 @@ def fosters_inverse(raw,ntype):
     ## calculate sensor noise covariance
     if ntype=='E':
         #TODO: is this the best time period to calculate N?
-        N = mne.compute_raw_covariance(raw,tmin=0,tmax=10,rank="info",method='empirical')["data"]
+        N = mne.compute_raw_covariance(raw,tmin=0,tmax=Ntmax,rank="info",picks='mag',method='empirical')["data"]
     if ntype =='OTP':
         ## calculate N using OTP method
         raw_otp = mne.preprocessing.oversampled_temporal_projection(raw, duration = 100)
@@ -763,7 +821,7 @@ def plot3Dhelmetwithhpi(raw,ax,showLabels=True,showDevice=True,thetitle=''):
 # --- Main (example usage) ----------------------------------------------------
 if __name__ == '__main__':
    # --- Load user-specific config (copy config_template.py -> config.py and fill in your paths)
-    from config import sample_dir, raw_files, trans, subjects_dir, subject, task, modality, viz_bool, sss_bool, save_report, report_dir, save_raw
+    from config_XM import sample_dir, raw_files, trans, subjects_dir, subject, task, modality, viz_bool, sss_bool, msss_bool, save_report, report_dir, save_raw
     ## if getting a FreeSurfer error, set this variable to the location of your subjects anatomy
     # os.environ["SUBJECTS_DIR"] = subjects_dir
     
@@ -781,6 +839,8 @@ if __name__ == '__main__':
             info = raw.info
             picks = mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads')
             reject_criteria = dict(grad=4000e-13) #4000 fT/cm
+            #TODO: drop EEG channels
+            #raw.pick(picks=['meg', 'ref_meg']) 
                 
         elif modality=='CTF':  
             trigger_chan='STIM'
@@ -790,6 +850,8 @@ if __name__ == '__main__':
             info = mne.pick_info(raw.info, mne.pick_types(raw.info, meg=True, eeg=False, ref_meg=False))
             picks = mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads')
             reject_criteria = dict(grad=4000e-13) #4000 fT/cm
+            #TODO: drop EEG channels
+            #raw.pick(picks=['meg', 'ref_meg']) 
             
         elif modality == 'OPM':
             trigger_chan = 'di2'
@@ -802,7 +864,10 @@ if __name__ == '__main__':
             print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
         
         ## -- Load and Setup Events
+        if save_report:
+            report = mne.Report(title="Report for subject: "+subject + ", Task: "+ task)   
         [events_df,events] = get_events(raw,task,trigger_chan,modality)
+
         
         # --- 1.B Look at Events -----------------------------------------------
         ## save events
@@ -812,7 +877,6 @@ if __name__ == '__main__':
             fig = mne.viz.plot_events(events, sfreq=raw.info["sfreq"], first_samp=raw.first_samp)
         ##set up report
         if save_report:
-            report = mne.Report(title="Report for subject: "+subject + ", Task: "+ task)
             report.add_raw(raw=raw, title= subject +', '+modality+', '+task, psd=True)
             report.add_trans(trans=trans, info=raw.info, title='Coregistration',subject=subject,subjects_dir=subjects_dir)
             report.add_events(events=events, title='Events from "events"', sfreq=sfreq)
@@ -838,10 +902,20 @@ if __name__ == '__main__':
         raw = filter_raw(raw,freq_min,freq_max)
         #downsample?
         
-        #-- Do SSS
+        #-- Do Foster's inverse with SSS, with mSSS, or mSSS alone
         if sss_bool and modality == 'OPM':
-            ## using Epirical noise covariance method
-            raw = fosters_inverse(raw,'E')
+            if msss_bool==True:
+            ## do Foster's Inverse with mSSS
+                conductivity = conductivity = (0.3, 0.006, 0.3)
+                bem_model = mne.make_bem_model(subject=subject, ico=4, conductivity=conductivity, subjects_dir=subjects_dir)
+                centers = fit_spheres_to_mri(subjects_dir, subject, bem_model, trans, 2, viz_bool)
+
+                raw = apply_preprocessing(np.transpose(centers[0]), np.transpose(centers[1]), raw, trigger_chan, True, msss_bool, 8, 3)
+            else:
+                ## Do Foster's Inverse with SSS
+                first_trigger_sample = events[0, 0]
+                Ntmax = (first_trigger_sample - raw.first_samp) / raw.info['sfreq']
+                raw = fosters_inverse(raw,Ntmax,'E')
         
         #-- do SSP, one projector
         #raw_pre = ssp_filter(raw)
@@ -909,14 +983,15 @@ if __name__ == '__main__':
 
         # Shared report and visualization
         for cond, ev in evokeds.items():
+            topomap_args = dict(time_unit="s",
+                                ch_type="mag", 
+                                sensors=True)
             if save_report:
-                report.add_evokeds(evokeds=ev, titles=[cond])
+                report.add_evokeds(evokeds=ev.pick("mag"), titles=[cond])
             if viz_bool:
                 ts_args = dict(time_unit="s")
-                topomap_args = dict(time_unit="s")
-                ev.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args,
-                              title=file + ' Task: ' + task + ', Condition: ' + cond)
-        
+                ev.plot_joint(times="peaks",  picks="mag", ts_args=ts_args, topomap_args=topomap_args,
+                              title=' Subject: ' + subject +' Task: ' + task + ', Condition: ' + cond)
         # evokeds = [epochs[name].average() for name in event_ids]
         # conds = list(event_ids.keys())
           
@@ -1052,4 +1127,4 @@ if __name__ == '__main__':
             report.add_bem(subject=subject, title='BEM')
             report.add_stc(stc=stc, title="STC")
             report_dir=report_dir
-            report.save(report_dir+ file + "report_raw.html", overwrite=True)
+            report.save(report_dir+ subject + modality + task + "_report_raw.html", overwrite=True)
