@@ -5,8 +5,8 @@ import os
 ###############################################################################
 ## --- User Specified Parameters -------------------------------------------------
 # --- choose the subject modality, and task -----------------------------------
-subject = 'S005'
-task = 'Tones'
+subject = 'S009'
+task = 'VWFA'
 modality = 'OPM' #'OPM' or 'CTF' or #'EEG'
 # -- add your parent folder --
 directory = '/Users/alexandria/Documents/STANFORD/DATA/2026_Gwilliams_MultimodalImaging/BIDS_test/'
@@ -16,6 +16,9 @@ subjects_dir = '/Users/alexandria/Downloads/freesurfer/subjects'
 os.environ["SUBJECTS_DIR"] = subjects_dir
 
 # --- Choose Visualization & Output -------------------------------------------
+# if no extra bads to add to "info", leave empty
+bads_runlog = []
+
 ## choose preprocessing
 sss_bool = True ## Will do Foster's inverse with SSS, False=no preprocessing
 msss_bool = False ## Will do foster's with mSSS, False=just with SSS

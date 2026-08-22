@@ -821,7 +821,7 @@ def plot3Dhelmetwithhpi(raw,ax,showLabels=True,showDevice=True,thetitle=''):
 # --- Main (example usage) ----------------------------------------------------
 if __name__ == '__main__':
    # --- Load user-specific config (copy config_template.py -> config.py and fill in your paths)
-    from config_XM import sample_dir, raw_files, trans, subjects_dir, subject, task, modality, viz_bool, sss_bool, msss_bool, save_report, report_dir, save_raw
+    from config_XM import sample_dir, raw_files, trans, subjects_dir, subject, task, modality, bads_runlog, viz_bool, sss_bool, msss_bool, save_report, report_dir, save_raw
     ## if getting a FreeSurfer error, set this variable to the location of your subjects anatomy
     # os.environ["SUBJECTS_DIR"] = subjects_dir
     
@@ -838,7 +838,7 @@ if __name__ == '__main__':
             raw.apply_gradient_compensation(3)
             info = raw.info
             picks = mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads')
-            reject_criteria = dict(grad=4000e-13) #4000 fT/cm
+            reject_criteria = dict(mag=3000e-15, eog=200e-6)              
             #TODO: drop EEG channels
             #raw.pick(picks=['meg', 'ref_meg']) 
                 
@@ -849,7 +849,8 @@ if __name__ == '__main__':
             #info = raw.info
             info = mne.pick_info(raw.info, mne.pick_types(raw.info, meg=True, eeg=False, ref_meg=False))
             picks = mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads')
-            reject_criteria = dict(grad=4000e-13) #4000 fT/cm
+            #-- specifcy rejection criteria for bad channels/epochs
+            reject_criteria = dict(mag=3000e-15)              
             #TODO: drop EEG channels
             #raw.pick(picks=['meg', 'ref_meg']) 
             
@@ -858,8 +859,12 @@ if __name__ == '__main__':
             raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
             info = raw.info
             picks='mag'
+            #-- specifcy rejection criteria for bad channels/epochs
+            reject_criteria = dict(#mag=5000e-15,
+                                   eog=0.5e-11) #eog=200e-6, 0.5e-11
+            flat_criteria = dict(mag=1e-15) 
+            
             #picks = mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads')
-            reject_criteria = dict(mag=4000e-15)  # 4000fT
         else:
             print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
         
@@ -892,9 +897,13 @@ if __name__ == '__main__':
             if np.isnan(ch_pos).any():
                 bads_NaNs.append(raw.info["chs"][i]["ch_name"])
         raw.info["bads"].extend(bads_NaNs)
-        raw.drop_channels(bads)
-        ## TODO: add another step for looking at bad channels, when to mark bad on OPM -- obvious in FFT
-        
+        # raw.drop_channels(bads)
+        if bads_runlog:
+            raw.info["bads"].extend(bads_runlog)       
+            
+        #-- Interpolate bads - set origin to zero in "HEAD" frame
+        raw.interpolate_bads(origin=[0,0,0],reset_bads=True)
+            
         #-- Notch filter 60Hz, low pass and high pass
         ## TODO split freq by task
         freq_min = 0.5
@@ -902,7 +911,43 @@ if __name__ == '__main__':
         raw = filter_raw(raw,freq_min,freq_max)
         #downsample?
         
-        #-- Do Foster's inverse with SSS, with mSSS, or mSSS alone
+        #-- Detect Eyeblinks --------------------------------------------------
+        if modality == 'OPM':
+            # extract data from two frontal OPM sensors
+            ch1_data = raw.copy().pick_channels(['R401_bz-s22']).get_data()[0] #'R101_bz-s142'
+            ch2_data = raw.copy().pick_channels(['L401_bz-s92']).get_data()[0] #'L101_bz-s139'
+            # differential signal (Left - Right)
+            occ_signal = ch1_data - ch2_data
+            # create new channel called EOG
+            sfreq = raw.info['sfreq']
+            new_ch_name = 'EOG' 
+            info_new = mne.create_info([new_ch_name], sfreq=sfreq, ch_types=['eog'])
+            # Load the occ_signal data to the newly created channel
+            raw_eog = mne.io.RawArray(occ_signal[np.newaxis, :], info_new)
+            # Add the new EOG channel in the Raw object
+            raw.add_channels([raw_eog], force_update_info=True)
+            # now find EOG events
+            eog_events = mne.preprocessing.find_eog_events(raw, ch_name='EOG')
+            n_blinks = len(eog_events)
+            # check that they do look like blinks and how many
+            if viz_bool:
+                eog_epochs = mne.preprocessing.create_eog_epochs(raw, baseline=(-0.5, -0.2))
+                eog_epochs.plot_image(combine="mean")
+                eog_epochs.average().plot_joint()
+            # annotate +/-250ms around blink as "bad"
+            # TODO: check this value
+            onset = eog_events[:, 0] / raw.info['sfreq'] - 0.25
+            duration = np.repeat(0.5, n_blinks)
+            description = ['BAD-blink'] * n_blinks
+            orig_time = raw.info['meas_date']
+            annotations_blink = mne.Annotations(onset, duration, description, orig_time)
+            # add annotations to RAW
+            raw.set_annotations(annotations_blink)
+            if viz_bool:
+                raw.plot(events=eog_events)
+            
+            
+        #-- Do Foster's inverse with SSS, with mSSS, or mSSS alone ------------
         if sss_bool and modality == 'OPM':
             if msss_bool==True:
             ## do Foster's Inverse with mSSS
@@ -961,13 +1006,31 @@ if __name__ == '__main__':
             tmin = -0.05
             tmax = 0.3
 
-        # Single shared Epochs call — all tasks use metadata for condition labels
-        epochs = mne.Epochs(raw, events,
-                    tmin=tmin, tmax=tmax,
-                    baseline=None,
-                    # picks=picks,
-                    reject=None,
-                    preload=True, metadata=events_df)
+        
+        epochs = mne.Epochs(raw, 
+                            events,
+                            tmin=tmin, 
+                            tmax=tmax, 
+                            baseline=None, 
+                            reject_by_annotation=True, 
+                            preload=True,
+                            metadata=events_df)
+        if viz_bool:
+             epochs.plot_drop_log()
+        original_metadata = events_df.copy() 
+        # MNE stores drop reasons as a list of tuples in epochs.drop_log
+        is_eog_drop = ['BAD-blink' in reason for reason in epochs.drop_log]
+        original_metadata['dropped_EOG'] = is_eog_drop
+        eog_drops_per_condition = original_metadata[original_metadata['dropped_EOG']].groupby('condition').size()
+        print(eog_drops_per_condition)
+        
+        # # Count rejected epochs per condition
+        # for condition in epochs.event_id.keys():
+        #     epochs_cond = epochs[condition]
+        #     n_total = len(epochs_cond.selection) + len(epochs_cond.drop_log)
+        #     n_dropped = sum([len(log) > 0 for log in epochs_cond.drop_log])
+        #     print(f"{condition}: {n_dropped}/{n_total} epochs rejected")
+                
 
         # Build evokeds — V1Loc groups bin/* and noise/* together; other tasks average per condition
         if task == "V1Loc":
@@ -980,12 +1043,12 @@ if __name__ == '__main__':
             query = "condition == '{}'"
             for cond in epochs.metadata['condition'].unique():
                 evokeds[str(cond)] = epochs[query.format(cond)].average()
-
-        # Shared report and visualization
-        for cond, ev in evokeds.items():
-            topomap_args = dict(time_unit="s",
-                                ch_type="mag", 
-                                sensors=True)
+            
+            ###--- Shared report and visualization
+            for cond, ev in evokeds.items():
+                topomap_args = dict(time_unit="s",
+                                    ch_type="mag", 
+                                    sensors=True)
             if save_report:
                 report.add_evokeds(evokeds=ev.pick("mag"), titles=[cond])
             if viz_bool:
@@ -1008,6 +1071,46 @@ if __name__ == '__main__':
             epochs_fif_path = os.path.join(sample_dir,f'sub-{subject}_task-{task}_preproc_epo.fif')
             epochs.save(epochs_fif_path, overwrite=True)
             print(f"Clean epochs saved → {epochs_fif_path}")
+
+        
+        if task == 'VWFA' and modality=='CTF':
+            channel_names_left = ['MRO51-2206', 'MRO52-2206', 'MO53-2206']
+
+            conditions = ['highFreqWords','pseudowords','consonants','falseFontsHigh']
+            
+            # Set a color map for different conditions
+            colors = plt.get_cmap('tab10')
+            
+            # Create a figure for the plot
+            plt.figure()
+            
+            # Loop through each condition and plot the average
+            for i, c in enumerate(conditions):
+                # Get epochs related to this condition
+            
+                condition_epochs = epochs[f"condition == '{c}'"]
+            
+                # Average over those epochs
+                condition_evoked = condition_epochs.average()
+            
+                # Get the indices for the channels you want
+                picks = [condition_evoked.ch_names.index(ch) for ch in channel_names_left]
+                # Get the data for those channels and average across channels
+                data = condition_evoked.data[picks, :].mean(axis=0)
+                times = condition_evoked.times
+                plt.plot(times, data, label=c, color=colors(i))
+
+            # Add titles and labels
+            plt.title('Left Occipitotemporal Channels averaged')
+            plt.xlabel('Time (s)')
+            plt.ylabel('Amplitude (T/m)')
+            plt.axhline(0, color='k', linestyle='--', linewidth=0.5)  # Horizontal line at y=0
+            plt.legend()
+            plt.show()
+
+
+
+
 
         # --- 4. Create covariance --------------------------------------------
         cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank='info')
