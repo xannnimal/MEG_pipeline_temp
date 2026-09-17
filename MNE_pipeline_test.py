@@ -37,12 +37,6 @@ from mne import Covariance
 from mne.minimum_norm import (make_inverse_operator, write_inverse_operator, apply_inverse)
 from mne.beamformer import make_lcmv, apply_lcmv
 from mne.surface import read_surface
-
-# import functions for Foster's and mSSS
-from utils.fit_spheres_to_mri import fit_spheres_to_mri
-from utils.run_fosters_mSSS import apply_preprocessing
-
-
 # This takes care some numpy dependency issues...not required depending on the numpy version
 warnings.filterwarnings("ignore", message="numpy.dtype size changed")
 warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
@@ -269,6 +263,53 @@ def get_events(raw,task,trigger_chan,modality):
         
         
 ## -- Preprocessing Functions -------------------------------------------------
+# -- find and annotate blinks for VWFA and V1Loc
+def annotate_blinks(raw, viz_bool, modality):
+    if modality == 'OPM':
+        # extract data from two frontal OPM sensors
+        ch1_data = raw.copy().pick_channels(['R401_bz-s22']).get_data()[0] 
+        ch2_data = raw.copy().pick_channels(['L401_bz-s92']).get_data()[0] 
+        # differential signal (Left - Right)
+        occ_signal = ch1_data - ch2_data
+        #thresh=(max(occ_signal) - min(occ_signal)) / 4
+    if modality == 'CTF':
+        # extract data from two frontal OPM sensors
+        ch1_data = raw.copy().pick_channels(['MRT31-2206']).get_data()[0] 
+        ch2_data = raw.copy().pick_channels(['MLT31-2206']).get_data()[0] 
+        # differential signal (Left - Right)
+        occ_signal = ch1_data - ch2_data
+    # create new channel called EOG
+    sfreq = raw.info['sfreq']
+    new_ch_name = 'EOG' 
+    info_new = mne.create_info([new_ch_name], sfreq=sfreq, ch_types=['eog'])
+    # Load the occ_signal data to the newly created channel
+    raw_eog = mne.io.RawArray(occ_signal[np.newaxis, :], info_new)
+    # Add the new EOG channel in the Raw object
+    raw.add_channels([raw_eog], force_update_info=True)
+    # now find EOG events
+    eog_events = mne.preprocessing.find_eog_events(raw,ch_name='EOG')
+    # auto_thresh = (np.max(eog_data) - np.min(eog_data)) / 4
+    n_blinks = len(eog_events)
+    # check that they do look like blinks and how many
+    if viz_bool:
+        eog_epochs = mne.preprocessing.create_eog_epochs(raw, baseline=(-0.5, -0.2))
+        eog_epochs.plot_image(combine="mean")
+        eog_epochs.average().plot_joint()
+    # annotate +/-250ms around blink as "bad"
+    onset = eog_events[:, 0] / raw.info['sfreq'] - 0.25
+    duration = np.repeat(0.5, n_blinks)
+    description = ['BAD-blink'] * n_blinks
+    orig_time = raw.info['meas_date']
+    annotations_blink = mne.Annotations(onset, duration, description, orig_time)
+    # add annotations to RAW
+    raw.set_annotations(annotations_blink)
+    if viz_bool:
+        raw.plot(events=eog_events)
+    return raw
+
+
+
+
 def filter_raw(raw,freq_min,freq_max):
     raw.load_data().filter(l_freq=freq_min, h_freq=None)
     raw.filter(l_freq=None, h_freq=freq_max)
@@ -337,7 +378,6 @@ def fosters_inverse(raw,Ntmax,ntype):
     """
     ## calculate sensor noise covariance
     if ntype=='E':
-        #TODO: is this the best time period to calculate N?
         N = mne.compute_raw_covariance(raw,tmin=0,tmax=Ntmax,rank="info",picks='mag',method='empirical')["data"]
     if ntype =='OTP':
         ## calculate N using OTP method
@@ -468,7 +508,8 @@ def _get_identity_cov(fwd, evoked):
 # --- Forward Solution --------------------------------------------------------
 
 def make_forward(subject_id, subjects_dir, trans, evoked,
-                 overwrite_fwd=True, overwrite=False,
+                 overwrite_fwd=False, overwrite_bem=False,
+                 overwrite_src=False,
                  fixed=True, bem_ico=4, src_space="oct7",
                  conductivity=(0.3, 0.006, 0.3),
                  mindist=5, surface='mid',
@@ -486,9 +527,13 @@ def make_forward(subject_id, subjects_dir, trans, evoked,
     subjects_dir : str or Path
         FreeSurfer SUBJECTS_DIR.
     overwrite_fwd : bool
-        If False, read existing forward if available.
-    overwrite : bool
-        If True, recompute BEM and source space even if files exist.
+        If False, read an existing forward for the same saved configuration.
+        Set to True after changing ``trans`` or the sensor information in
+        ``evoked``, which are not encoded in the cache filename.
+    overwrite_bem : bool
+        If True, recompute the BEM model and solution even if files exist.
+    overwrite_src : bool
+        If True, recompute the source space even if its file exists.
     fixed : bool
         Convert to fixed (surface-normal) orientation.
     bem_ico : int
@@ -516,10 +561,22 @@ def make_forward(subject_id, subjects_dir, trans, evoked,
     subjects_dir = str(subjects_dir)
     bem_path = Path(subjects_dir) / subject / 'bem'
     modality_tag = 'eeg' if (eeg and not meg) else ('meg' if (meg and not eeg) else 'meeg')
-    fwd_path = bem_path / f'{subject}-{modality_tag}-fwd.fif'
+
+    conductivity_values = np.asarray(conductivity, dtype=float).ravel()
+    n_bem_layers = conductivity_values.size
+    conductivity_tag = '-'.join(
+        f'{value:g}'.replace('.', 'p') for value in conductivity_values
+    )
+    mindist_tag = f'{mindist:g}'.replace('.', 'p')
+    fwd_path = bem_path / (
+        f'{subject}-{modality_tag}-{src_space}-{surface}-'
+        f'bem{n_bem_layers}layer-ico{bem_ico}-cond{conductivity_tag}-'
+        f'mindist{mindist_tag}-fwd.fif'
+    )
 
     # --- Try loading existing forward ---
-    if fwd_path.exists() and not overwrite_fwd:
+    rebuild_fwd = overwrite_fwd or overwrite_bem or overwrite_src
+    if fwd_path.exists() and not rebuild_fwd:
         print("---- Reading existing forward solution ----")
         fwd = mne.read_forward_solution(str(fwd_path))
         if fixed:
@@ -537,7 +594,7 @@ def make_forward(subject_id, subjects_dir, trans, evoked,
             _create_mid_surface(subjects_dir, subject, hemi)
 
     # --- BEM model & solution ---
-    if isinstance(conductivity, tuple) and len(conductivity) == 3:
+    if n_bem_layers == 3:
         scale = str(round(1 / (conductivity[1] / conductivity[2])))
     else:
         scale = "1layer"
@@ -545,21 +602,40 @@ def make_forward(subject_id, subjects_dir, trans, evoked,
     bem_fname = bem_path / f'{subject}-scale{scale}-ico{bem_ico}-bem.fif'
     bem_sol_fname = bem_path / f'{subject}-scale{scale}-ico{bem_ico}-bem-sol.fif'
 
-    if not bem_fname.exists() or overwrite:
-        mne.bem.make_watershed_bem(subject=subject, overwrite=True,volume='T1',atlas=True, gcaatlas=True,show=visualize)              
+    if bem_sol_fname.exists() and not overwrite_bem:
+        print("---- Reading existing BEM solution ----")
+        bem = mne.read_bem_solution(str(bem_sol_fname))
+    else:
+        # Flash and watershed BEMs both expose the surfaces through these
+        # standard names.  Prefer whatever is already selected there instead
+        # of regenerating (and potentially replacing) it based on a cache
+        # filename.
+        required_surfaces = ['inner_skull.surf']
+        if n_bem_layers == 3:
+            required_surfaces.extend(['outer_skull.surf', 'outer_skin.surf'])
+        missing_surfaces = [name for name in required_surfaces
+                            if not (bem_path / name).exists()]
+
+        if missing_surfaces:
+            print("---- Required BEM surfaces missing; running watershed BEM ----")
+            mne.bem.make_watershed_bem(
+                subject=subject, subjects_dir=subjects_dir, overwrite=True,
+                volume='T1', atlas=True, gcaatlas=True, show=visualize,
+            )
+        else:
+            print("---- Building BEM from existing FreeSurfer BEM surfaces ----")
+
         model = mne.make_bem_model(subject=subject, ico=bem_ico,
-                                   conductivity=conductivity)
+                                   conductivity=conductivity,
+                                   subjects_dir=subjects_dir)
         mne.write_bem_surfaces(str(bem_fname), model, overwrite=True)
         bem = mne.make_bem_solution(model)
         mne.write_bem_solution(str(bem_sol_fname), bem, overwrite=True)
-    else:
-        print("---- Reading existing BEM ----")
-        bem = mne.read_bem_solution(str(bem_sol_fname))
 
     # --- Source space ---
     src_fname = bem_path / f'{subject}-{src_space}-src.fif'
 
-    if not src_fname.exists() or overwrite:
+    if not src_fname.exists() or overwrite_src:
         src = mne.setup_source_space(subject=subject, spacing=src_space,
                                      surface=surface, add_dist=False)
         mne.write_source_spaces(str(src_fname), src, overwrite=True)
@@ -821,7 +897,7 @@ def plot3Dhelmetwithhpi(raw,ax,showLabels=True,showDevice=True,thetitle=''):
 # --- Main (example usage) ----------------------------------------------------
 if __name__ == '__main__':
    # --- Load user-specific config (copy config_template.py -> config.py and fill in your paths)
-    from config_XM import sample_dir, raw_files, trans, subjects_dir, subject, task, modality, bads_runlog, viz_bool, sss_bool, msss_bool, save_report, report_dir, save_raw
+    from config_XM import sample_dir, raw_files, trans, subjects_dir, subject, task, modality, bads_runlog, viz_bool, blinks_bool, sss_bool, msss_bool, save_report, report_dir, save_raw
     ## if getting a FreeSurfer error, set this variable to the location of your subjects anatomy
     # os.environ["SUBJECTS_DIR"] = subjects_dir
     
@@ -838,7 +914,7 @@ if __name__ == '__main__':
             raw.apply_gradient_compensation(3)
             info = raw.info
             picks = mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads')
-            reject_criteria = dict(mag=3000e-15, eog=200e-6)              
+            reject_criteria = dict(grad=4000e-13) #4000 fT/cm
             #TODO: drop EEG channels
             #raw.pick(picks=['meg', 'ref_meg']) 
                 
@@ -849,8 +925,7 @@ if __name__ == '__main__':
             #info = raw.info
             info = mne.pick_info(raw.info, mne.pick_types(raw.info, meg=True, eeg=False, ref_meg=False))
             picks = mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads')
-            #-- specifcy rejection criteria for bad channels/epochs
-            reject_criteria = dict(mag=3000e-15)              
+            reject_criteria = dict(grad=4000e-13) #4000 fT/cm
             #TODO: drop EEG channels
             #raw.pick(picks=['meg', 'ref_meg']) 
             
@@ -859,12 +934,8 @@ if __name__ == '__main__':
             raw = mne.io.read_raw_fif(os.path.join(sample_dir,file),'default', preload=True)
             info = raw.info
             picks='mag'
-            #-- specifcy rejection criteria for bad channels/epochs
-            reject_criteria = dict(#mag=5000e-15,
-                                   eog=0.5e-11) #eog=200e-6, 0.5e-11
-            flat_criteria = dict(mag=1e-15) 
-            
             #picks = mne.pick_types(raw.info, meg=True, eeg=False, exclude='bads')
+            reject_criteria = dict(mag=4000e-15)  # 4000fT
         else:
             print("data file must be '.ds' for CTF or '.fif' for OPM MEG data")
         
@@ -887,7 +958,9 @@ if __name__ == '__main__':
             report.add_events(events=events, title='Events from "events"', sfreq=sfreq)
             
 
-        # --- 2. A Preprocess -------------------------------------------------
+        # --- 2. A Bad Channels and Preprocess -------------------------------------------------
+        spectrum = raw.compute_psd()
+        spectrum.plot(average=False, picks="data", exclude="bads", amplitude=False)
         ## start with methods common to both CTF and OPM-MEG
         #-- remove bad channels, check for NaNs
         bads = raw.info["bads"]
@@ -897,64 +970,30 @@ if __name__ == '__main__':
             if np.isnan(ch_pos).any():
                 bads_NaNs.append(raw.info["chs"][i]["ch_name"])
         raw.info["bads"].extend(bads_NaNs)
-        # raw.drop_channels(bads)
         if bads_runlog:
-            raw.info["bads"].extend(bads_runlog)       
-            
-        #-- Interpolate bads - set origin to zero in "HEAD" frame
-        raw.interpolate_bads(origin=[0,0,0],reset_bads=True)
-            
-        #-- Notch filter 60Hz, low pass and high pass
-        ## TODO split freq by task
+            raw.info["bads"].extend(bads_runlog)
+        
+        #-- Notch filter 60Hz, low pass and high pass       
         freq_min = 0.5
         freq_max = 50
         raw = filter_raw(raw,freq_min,freq_max)
-        #downsample?
         
-        #-- Detect Eyeblinks --------------------------------------------------
-        if modality == 'OPM':
-            # extract data from two frontal OPM sensors
-            ch1_data = raw.copy().pick_channels(['R401_bz-s22']).get_data()[0] #'R101_bz-s142'
-            ch2_data = raw.copy().pick_channels(['L401_bz-s92']).get_data()[0] #'L101_bz-s139'
-            # differential signal (Left - Right)
-            occ_signal = ch1_data - ch2_data
-            # create new channel called EOG
-            sfreq = raw.info['sfreq']
-            new_ch_name = 'EOG' 
-            info_new = mne.create_info([new_ch_name], sfreq=sfreq, ch_types=['eog'])
-            # Load the occ_signal data to the newly created channel
-            raw_eog = mne.io.RawArray(occ_signal[np.newaxis, :], info_new)
-            # Add the new EOG channel in the Raw object
-            raw.add_channels([raw_eog], force_update_info=True)
-            # now find EOG events
-            eog_events = mne.preprocessing.find_eog_events(raw, ch_name='EOG')
-            n_blinks = len(eog_events)
-            # check that they do look like blinks and how many
-            if viz_bool:
-                eog_epochs = mne.preprocessing.create_eog_epochs(raw, baseline=(-0.5, -0.2))
-                eog_epochs.plot_image(combine="mean")
-                eog_epochs.average().plot_joint()
-            # annotate +/-250ms around blink as "bad"
-            # TODO: check this value
-            onset = eog_events[:, 0] / raw.info['sfreq'] - 0.25
-            duration = np.repeat(0.5, n_blinks)
-            description = ['BAD-blink'] * n_blinks
-            orig_time = raw.info['meas_date']
-            annotations_blink = mne.Annotations(onset, duration, description, orig_time)
-            # add annotations to RAW
-            raw.set_annotations(annotations_blink)
-            if viz_bool:
-                raw.plot(events=eog_events)
-            
-            
-        #-- Do Foster's inverse with SSS, with mSSS, or mSSS alone ------------
+        #-- Detect and Annotate Eyeblinks --------------------------------------------------
+        if blinks_bool and (task=='VWFA' or task=='V1Loc'):
+            raw = annotate_blinks(raw, viz_bool, modality)
+           
+        #-- Interpolate bads - set origin to zero in "HEAD" frame
+        raw.interpolate_bads(origin=[0,0,0],reset_bads=True)
+        
+        #-- Do Foster's inverse with SSS, with mSSS, or mSSS alone
         if sss_bool and modality == 'OPM':
             if msss_bool==True:
             ## do Foster's Inverse with mSSS
+                from utils.fit_spheres_to_mri import fit_spheres_to_mri
+                from utils.run_fosters_mSSS import apply_preprocessing
                 conductivity = conductivity = (0.3, 0.006, 0.3)
                 bem_model = mne.make_bem_model(subject=subject, ico=4, conductivity=conductivity, subjects_dir=subjects_dir)
                 centers = fit_spheres_to_mri(subjects_dir, subject, bem_model, trans, 2, viz_bool)
-
                 raw = apply_preprocessing(np.transpose(centers[0]), np.transpose(centers[1]), raw, trigger_chan, True, msss_bool, 8, 3)
             else:
                 ## Do Foster's Inverse with SSS
@@ -962,11 +1001,9 @@ if __name__ == '__main__':
                 Ntmax = (first_trigger_sample - raw.first_samp) / raw.info['sfreq']
                 raw = fosters_inverse(raw,Ntmax,'E')
         
-        #-- do SSP, one projector
-        #raw_pre = ssp_filter(raw)
-        
+       
         if save_raw:
-            raw_clean_path = os.path.join(sample_dir,f'sub-{subject}_task-{task}_preproc_raw.fif')
+            raw_clean_path = os.path.join(sample_dir,f'derivatives/sub-{subject}_task-{task}_{modality}_preproc_raw.fif')
             raw.save(raw_clean_path, overwrite=True)
             print(f"Clean raw saved → {raw_clean_path}")
         
@@ -1000,38 +1037,44 @@ if __name__ == '__main__':
             tmax = tmin + (n_samples - 1) / sfreq  # exact sample-aligned tmax
         elif task == "VWFA":
             tmin = 0.0
-            tmax = 1.0
+            tmax = 0.8
         else:
             ## TODO: check Tones vs VWFA task specific epoch timing
             tmin = -0.05
             tmax = 0.3
 
-        
-        epochs = mne.Epochs(raw, 
-                            events,
-                            tmin=tmin, 
-                            tmax=tmax, 
-                            baseline=None, 
-                            reject_by_annotation=True, 
-                            preload=True,
-                            metadata=events_df)
-        if viz_bool:
-             epochs.plot_drop_log()
-        original_metadata = events_df.copy() 
-        # MNE stores drop reasons as a list of tuples in epochs.drop_log
-        is_eog_drop = ['BAD-blink' in reason for reason in epochs.drop_log]
-        original_metadata['dropped_EOG'] = is_eog_drop
-        eog_drops_per_condition = original_metadata[original_metadata['dropped_EOG']].groupby('condition').size()
-        print(eog_drops_per_condition)
-        
-        # # Count rejected epochs per condition
-        # for condition in epochs.event_id.keys():
-        #     epochs_cond = epochs[condition]
-        #     n_total = len(epochs_cond.selection) + len(epochs_cond.drop_log)
-        #     n_dropped = sum([len(log) > 0 for log in epochs_cond.drop_log])
-        #     print(f"{condition}: {n_dropped}/{n_total} epochs rejected")
-                
+        # Single shared Epochs call — all tasks use metadata for condition labels
+        epochs = mne.Epochs(raw, events,
+                    tmin=tmin, tmax=tmax,
+                    baseline=None,
+                    reject=None, # TODO make rejection dictionary
+                    reject_by_annotation=True, # reject eyeblink epochs
+                    preload=True, 
+                    metadata=events_df)
 
+        # report eyeblink statistics if task is VWFA or V1Loc
+        if blinks_bool:
+            original_metadata = events_df.copy() 
+            # MNE stores drop reasons as a list of tuples in epochs.drop_log
+            is_eog_drop = ['BAD-blink' in reason for reason in epochs.drop_log]
+            original_metadata['dropped_EOG'] = is_eog_drop
+            eog_drops_per_condition = original_metadata[original_metadata['dropped_EOG']].groupby('condition').size()
+            #print(eog_drops_per_condition)
+            if viz_bool:
+                 epochs.plot_drop_log()
+            if save_report:
+                # add drop log figure
+                fig = epochs.plot_drop_log(show=False)
+                report.add_figure(
+                    fig=fig,
+                    title="Epoch Drop Log",
+                    section="Epochs")
+                # add text describing how many dropped per conditions
+                html_content = f"<p>{eog_drops_per_condition}</p>"
+                # Add the text to the report
+                report.add_html(html=html_content, title="Blink Epochs dropped per condition")
+        
+        
         # Build evokeds — V1Loc groups bin/* and noise/* together; other tasks average per condition
         if task == "V1Loc":
             evokeds = {
@@ -1043,74 +1086,24 @@ if __name__ == '__main__':
             query = "condition == '{}'"
             for cond in epochs.metadata['condition'].unique():
                 evokeds[str(cond)] = epochs[query.format(cond)].average()
-            
-            ###--- Shared report and visualization
-            for cond, ev in evokeds.items():
-                topomap_args = dict(time_unit="s",
-                                    ch_type="mag", 
-                                    sensors=True)
+
+        # Shared report and visualization
+        for cond, ev in evokeds.items():
+            topomap_args = dict(time_unit="s",
+                                ch_type="mag", 
+                                sensors=True)
             if save_report:
                 report.add_evokeds(evokeds=ev.pick("mag"), titles=[cond])
             if viz_bool:
                 ts_args = dict(time_unit="s")
                 ev.plot_joint(times="peaks",  picks="mag", ts_args=ts_args, topomap_args=topomap_args,
                               title=' Subject: ' + subject +' Task: ' + task + ', Condition: ' + cond)
-        # evokeds = [epochs[name].average() for name in event_ids]
-        # conds = list(event_ids.keys())
-          
-        # # average over all conditions within the Task
-        # epochs_task = mne.Epochs(raw_pre, events, picks=[picks], tmin=tmin, tmax=tmax, preload=True)
-        # evoked = epochs_task.average()
-        # if viz_bool:
-        #     ## specify plotting args
-        #     ts_args = ts_args = dict(time_unit="s") 
-        #     topomap_args = dict(time_unit="s") 
-        #     fig = evoked.plot_joint(times="peaks", ts_args=ts_args, topomap_args=topomap_args, title= file+ ' Task: '+ task)
         
         if save_raw:
             epochs_fif_path = os.path.join(sample_dir,f'sub-{subject}_task-{task}_preproc_epo.fif')
             epochs.save(epochs_fif_path, overwrite=True)
             print(f"Clean epochs saved → {epochs_fif_path}")
-
-        
-        if task == 'VWFA' and modality=='CTF':
-            channel_names_left = ['MRO51-2206', 'MRO52-2206', 'MO53-2206']
-
-            conditions = ['highFreqWords','pseudowords','consonants','falseFontsHigh']
             
-            # Set a color map for different conditions
-            colors = plt.get_cmap('tab10')
-            
-            # Create a figure for the plot
-            plt.figure()
-            
-            # Loop through each condition and plot the average
-            for i, c in enumerate(conditions):
-                # Get epochs related to this condition
-            
-                condition_epochs = epochs[f"condition == '{c}'"]
-            
-                # Average over those epochs
-                condition_evoked = condition_epochs.average()
-            
-                # Get the indices for the channels you want
-                picks = [condition_evoked.ch_names.index(ch) for ch in channel_names_left]
-                # Get the data for those channels and average across channels
-                data = condition_evoked.data[picks, :].mean(axis=0)
-                times = condition_evoked.times
-                plt.plot(times, data, label=c, color=colors(i))
-
-            # Add titles and labels
-            plt.title('Left Occipitotemporal Channels averaged')
-            plt.xlabel('Time (s)')
-            plt.ylabel('Amplitude (T/m)')
-            plt.axhline(0, color='k', linestyle='--', linewidth=0.5)  # Horizontal line at y=0
-            plt.legend()
-            plt.show()
-
-
-
-
 
         # --- 4. Create covariance --------------------------------------------
         cov = mne.compute_covariance(epochs, tmax=0, projs=None, method="empirical", rank='info')
@@ -1120,29 +1113,12 @@ if __name__ == '__main__':
 
         # --- 5. Forward solution ---------------------------------------------
         # ##fwd = make_forward(subject, trans, evoked, subjects_dir)
-        src = mne.setup_source_space(subject, spacing="ico4", add_dist="patch", subjects_dir=subjects_dir)
-        # conductivity = (0.3,)  # for single layer
-        conductivity = (0.3, 0.006, 0.3)  # for three layers
-        model = mne.make_bem_model(subject=subject, ico=4, conductivity=conductivity, subjects_dir=subjects_dir)
-        bem = mne.make_bem_solution(model)
-        fwd = mne.make_forward_solution(
-            raw.info,
-            trans=trans,
-            src=src,
-            bem=bem,
-            meg=True,
-            eeg=False,
-            mindist=5.0,
-            n_jobs=None,
-            verbose=True,
-        )
         # src = mne.setup_source_space(subject, spacing="ico4", add_dist="patch", subjects_dir=subjects_dir)
-        # conductivity = (0.3,)  # for single layer
-        # # conductivity = (0.3, 0.006, 0.3)  # for three layers
+        # conductivity = (0.3, 0.006, 0.3)  # for three layers
         # model = mne.make_bem_model(subject=subject, ico=4, conductivity=conductivity, subjects_dir=subjects_dir)
         # bem = mne.make_bem_solution(model)
         # fwd = mne.make_forward_solution(
-        #     os.path.join(sample_dir,file),
+        #     raw.info,
         #     trans=trans,
         #     src=src,
         #     bem=bem,
@@ -1152,26 +1128,25 @@ if __name__ == '__main__':
         #     n_jobs=None,
         #     verbose=True,
         # )
-        # This version gave error "Surface inner skull is not completely inside surface outer skull"?
+        
         # update 2026 Apr 7 (QF): make_forward finished without error
-        # fwd = make_forward(subject, subjects_dir, trans, evoked,
-        #                  overwrite_fwd=False, overwrite=False,
-        #                  fixed=True, bem_ico=4, src_space="oct7",
+        # fwd = make_forward(subject, subjects_dir, trans, evokeds,
+        #                  overwrite_fwd=True, overwrite_bem=False,
+        #                  overwrite_src=True,
+        #                  fixed=False, bem_ico=4, src_space="oct7",
         #                  conductivity=(0.3, 0.006, 0.3),
         #                  mindist=5, surface='mid',
         #                  visualize=False, verbose=False)
         
         # --- 6. Inverse solution ---------------------------------------------
-        # fwd = mne.read_forward_solution(f'{subjects_dir}/{subject}/bem/{subject}-fwd.fif')
-        # cov = mne.read_cov(f'{sample_dir}/V1Loc_empirical_cov.fif')
-        # stc, inv_op = make_inverse(subjects_dir, subject, fwd, evoked, cov, inverse_method="dSPM")
         for cond in evokeds.keys():
-            # fwd = make_forward(subject, subjects_dir, trans, evokeds[cond],
-            #                  overwrite_fwd=False, overwrite=False,
-            #                  fixed=True, bem_ico=4, src_space="oct7",
-            #                  conductivity=(0.3, 0.006, 0.3),
-            #                  mindist=5, surface='mid',
-            #                  visualize=False, verbose=False)
+            fwd = make_forward(subject, subjects_dir, trans, evokeds[cond],
+                             overwrite_fwd=True, overwrite_bem=False,
+                             overwrite_src=True,
+                             fixed=False, bem_ico=4, src_space="oct7",
+                             conductivity=(0.3, 0.006, 0.3),
+                             mindist=5, surface='mid',
+                             visualize=False, verbose=False)
             inv_operator = mne.minimum_norm.make_inverse_operator(evokeds[cond].info, fwd, cov, loose = 1, depth = None, fixed = False)
             # # --- 7. Apply inverse to evokeds -------------------------------------
             method = "dSPM"  # could choose MNE, sLORETA, or eLORETA instead
